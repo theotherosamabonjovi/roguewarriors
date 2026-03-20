@@ -353,6 +353,7 @@ const UI = {
     this.renderer.deployHighlights = [];
     this._deploySelectedUnit = null;
     this._updateAllPanels();
+    this._checkAITurn();
   },
 
   _updateDeployBanner() {
@@ -368,10 +369,14 @@ const UI = {
   },
 
   // ─── Game canvas events ─────────────────────────────────
+  _canvasListenersAttached: false,
+
   _setupGameCanvas() {
+    if (this._canvasListenersAttached) return;  // only attach once ever
+    this._canvasListenersAttached = true;
     const canvas = document.getElementById('battlefield');
-    canvas.addEventListener('mousemove', (e) => this._onHover(e));
-    canvas.addEventListener('click',     (e) => this._onClick(e));
+    canvas.addEventListener('mousemove',  (e) => this._onHover(e));
+    canvas.addEventListener('click',      (e) => this._onClick(e));
     canvas.addEventListener('mouseleave', () => {
       if (this.renderer) this.renderer.hoverTile = null;
     });
@@ -469,6 +474,18 @@ const UI = {
     }
   },
 
+  // ─── AI trigger ─────────────────────────────────────────
+  // Call after any action that could have ended the human's activation
+  _checkAITurn() {
+    const state = this.engine;
+    if (!state || state.phase !== 'playing') return;
+    if (this.mode !== 'ai') return;
+    if (state.currentPlayer !== 1) return;
+    if (this.aiRunning) return;
+    if (state.phase === 'gameover') return;
+    setTimeout(() => this._runAI(), 400);
+  },
+
   // ─── Action execution ────────────────────────────────────
   _doMove(unit, x, y) {
     const state = this.engine;
@@ -494,6 +511,7 @@ const UI = {
     this._showAttackHighlights(unit);
     this._updateAllPanels();
     this._syncOnline({ type: 'move', unitId: unit.id, x, y, sprint: actualSprint });
+    this._checkAITurn();
   },
 
   _doShoot(attacker, target) {
@@ -509,6 +527,7 @@ const UI = {
     }
     this._updateAllPanels();
     this._syncOnline({ type: 'shoot', unitId: attacker.id, targetId: target.id });
+    this._checkAITurn();
   },
 
   _doBlast(attacker, cx, cy) {
@@ -520,6 +539,7 @@ const UI = {
     this._cancelAbilityMode();
     this._updateAllPanels();
     this._syncOnline({ type: 'blast', unitId: attacker.id, x: cx, y: cy });
+    this._checkAITurn();
   },
 
   _doHeal(medic, target) {
@@ -529,6 +549,7 @@ const UI = {
     this._cancelAbilityMode();
     this._updateAllPanels();
     this._syncOnline({ type: 'heal', unitId: medic.id, targetId: target.id });
+    this._checkAITurn();
   },
 
   _cancelAbilityMode() {
@@ -553,6 +574,7 @@ const UI = {
     state.addLog(`🔭 ${unit.name} aims carefully…`, 'ability');
     this._updateAllPanels();
     if (state.activeUnit) this._showAttackHighlights(unit);
+    this._checkAITurn();
   },
 
   btnTakeCover() {
@@ -563,6 +585,7 @@ const UI = {
     state.addLog(`🛡️ ${unit.name} takes cover!`, 'ability');
     state.useAction(1);
     this._updateAllPanels();
+    this._checkAITurn();
   },
 
   btnSprint() {
@@ -587,6 +610,7 @@ const UI = {
         state.setOverwatch(unit);
         state.useAction(2);
         this._syncOnline({ type: 'overwatch', unitId: unit.id });
+        this._checkAITurn();
         break;
       case 'heal': {
         // Show heal targets (adjacent allies)
@@ -613,10 +637,12 @@ const UI = {
       case 'stealth':
         state.addLog(`👻 ${unit.name} activates Stealth — hard to target in cover!`, 'ability');
         state.useAction(1);
+        this._checkAITurn();
         break;
       case 'command':
         state.addLog(`📣 ${unit.name} rallies the squad — Command Aura active!`, 'ability');
         state.useAction(1);
+        this._checkAITurn();
         break;
     }
     this._updateAllPanels();
@@ -640,6 +666,7 @@ const UI = {
     state.useAction(2);
     this._updateAllPanels();
     this._syncOnline({ type: 'charge', unitId: unit.id, targetId: target.id });
+    this._checkAITurn();
   },
 
   btnEndActivation() {
@@ -659,10 +686,7 @@ const UI = {
       return;
     }
 
-    // Trigger AI if needed
-    if (this.mode === 'ai' && state.currentPlayer === 1 && state.phase === 'playing') {
-      setTimeout(() => this._runAI(), 600);
-    }
+    this._checkAITurn();
   },
 
   // ─── AI loop ────────────────────────────────────────────

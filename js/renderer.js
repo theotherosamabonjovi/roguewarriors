@@ -63,14 +63,14 @@ class Renderer {
     // Draw heal targets
     if (this.healTargets.length) this._drawHealTargets(state);
 
-    // Draw units
+    // Draw units (skip undeployed)
     state.units.forEach(u => {
-      if (u.alive) this._drawUnit(state, u);
+      if (u.alive && u.x >= 0 && u.y >= 0) this._drawUnit(state, u);
     });
 
-    // Draw dead units (tombstones)
+    // Draw dead units (tombstones, skip undeployed)
     state.units.forEach(u => {
-      if (!u.alive) this._drawTombstone(state, u);
+      if (!u.alive && u.x >= 0 && u.y >= 0) this._drawTombstone(state, u);
     });
 
     // Draw hover
