@@ -227,15 +227,27 @@
   </div>
 
   <div id="game-layout">
-    <!-- LEFT PANEL: Actions -->
+    <!-- LEFT PANEL: Actions + Deploy -->
     <div class="side-panel" id="left-panel">
-      <div class="panel-section" style="flex-shrink:0;">
+      <!-- Deploy phase panel (shown during deploy) -->
+      <div class="panel-section" id="deploy-section" style="display:none; flex:1; min-height:0; flex-direction:column;">
+        <div class="panel-title" id="deploy-panel-title">PLACE YOUR UNITS</div>
+        <div class="deploy-instructions" id="deploy-instructions">
+          Click a unit below, then click a highlighted tile on the map to place it.
+        </div>
+        <div id="deploy-panel"></div>
+        <button class="deploy-done-btn" id="deploy-done-btn" onclick="UI.finishDeployment()" disabled>
+          ✅ Done Deploying
+        </button>
+      </div>
+      <!-- Normal actions panel (shown during playing) -->
+      <div class="panel-section" id="actions-section" style="flex-shrink:0;">
         <div class="panel-title">ACTIONS</div>
         <div id="action-buttons">
           <div class="hint-text">← Select a game mode to start</div>
         </div>
       </div>
-      <div class="panel-section" style="flex:1; min-height:0; display:flex; flex-direction:column;">
+      <div class="panel-section" id="stats-section" style="flex:1; min-height:0; display:flex; flex-direction:column;">
         <div class="panel-title">UNIT STATS</div>
         <div id="unit-stats-panel" style="padding:8px; font-size:12px; color:var(--text2); flex:1; overflow:auto;">
           <p>Click a unit to see its stats</p>

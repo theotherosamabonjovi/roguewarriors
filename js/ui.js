@@ -207,7 +207,6 @@ const UI = {
     eng.players[0].squadDef = this.armyDraft[0];
     eng.players[1].squadDef = this.armyDraft[1];
     eng.mode = this.mode;
-    eng.deployUnits();
 
     this.engine   = eng;
     this.renderer = new Renderer('battlefield');
@@ -215,12 +214,157 @@ const UI = {
 
     this.showScreen('screen-game');
     this._setupGameCanvas();
-    this._updateAllPanels();
     this.startRenderLoop();
 
-    if (this.mode === 'online') {
-      this._setupMultiplayerCallbacks();
+    // Start interactive deployment
+    eng.startDeploy();
+    this._enterDeployPhase();
+  },
+
+  // ─── Deployment phase UI ─────────────────────────────────
+  _deploySelectedUnit: null,
+
+  _enterDeployPhase() {
+    const state = this.engine;
+    // Show deploy panel, hide actions panel
+    document.getElementById('deploy-section').style.display  = 'flex';
+    document.getElementById('actions-section').style.display = 'none';
+    document.getElementById('stats-section').style.display   = 'none';
+
+    this._renderDeployPanel(state.deployingTeam);
+    this._updateDeployBanner();
+    this._updateTeamPanels();
+    this._updateLog();
+
+    // Show deploy zone highlights for current team
+    this.renderer.deployHighlights = state.deployZone(state.deployingTeam);
+    this._deploySelectedUnit = null;
+  },
+
+  _renderDeployPanel(team) {
+    const state  = this.engine;
+    const panel  = document.getElementById('deploy-panel');
+    const doneBtn = document.getElementById('deploy-done-btn');
+    const title  = document.getElementById('deploy-panel-title');
+    const icons  = { rifleman:'🔫', sniper:'🎯', medic:'💉', grenadier:'💣', leader:'⭐', scout:'🏹' };
+
+    const color = team === 0 ? '#3a9eff' : '#ff4545';
+    title.textContent = `PLACE ${state.players[team].name.toUpperCase()}`;
+    title.style.color = color;
+
+    const units = state.units.filter(u => u.team === team);
+    panel.innerHTML = '';
+
+    units.forEach(u => {
+      const card = document.createElement('div');
+      card.className = 'deploy-unit-card' +
+        (u.deployed ? ' placed' : '') +
+        (this._deploySelectedUnit?.id === u.id ? ' selected' : '');
+      card.dataset.uid = u.id;
+      card.innerHTML = `
+        <div class="duc-icon" style="background:${UNIT_DEFS[u.type].color}">${icons[u.type]}</div>
+        <div class="duc-info">
+          <div class="duc-name">${u.name}</div>
+          <div class="duc-sub">${u.deployed ? '✅ Placed' : 'Click to select'}</div>
+        </div>
+      `;
+      if (!u.deployed) {
+        card.addEventListener('click', () => this._selectDeployUnit(u));
+      }
+      panel.appendChild(card);
+    });
+
+    // Enable Done button only when all units of this team are deployed
+    const allPlaced = units.every(u => u.deployed);
+    doneBtn.disabled = !allPlaced;
+  },
+
+  _selectDeployUnit(unit) {
+    this._deploySelectedUnit = unit;
+    this._renderDeployPanel(unit.team);
+    // Refresh valid tiles (exclude now-occupied spots)
+    this.renderer.deployHighlights = this.engine.deployZone(unit.team);
+    this.engine.addLog(`Selected ${unit.name} — click a yellow tile to place`, 'system');
+    this._updateLog();
+  },
+
+  _handleDeployClick(x, y) {
+    const state = this.engine;
+    const team  = state.deployingTeam;
+
+    // Click on already-placed friendly unit = pick it back up
+    const existingUnit = state.getUnitAt(x, y);
+    if (existingUnit && existingUnit.team === team) {
+      state.unplaceUnit(existingUnit);
+      this._deploySelectedUnit = existingUnit;
+      this.renderer.deployHighlights = state.deployZone(team);
+      this._renderDeployPanel(team);
+      this._updateLog();
+      return;
     }
+
+    if (!this._deploySelectedUnit) {
+      this.showNotif('Select a unit from the left panel first', 'warn');
+      return;
+    }
+
+    const ok = state.placeUnit(this._deploySelectedUnit, x, y);
+    if (ok) {
+      this._deploySelectedUnit = null;
+      this.renderer.deployHighlights = state.deployZone(team);
+      this._renderDeployPanel(team);
+      this._updateTeamPanels();
+      this._updateDeployBanner();
+      this._updateLog();
+    } else {
+      this.showNotif('Cannot place there — pick a highlighted tile in your zone', 'warn');
+    }
+  },
+
+  finishDeployment() {
+    const state = this.engine;
+    const team  = state.deployingTeam;
+    const unplaced = state.units.filter(u => u.team === team && !u.deployed);
+    if (unplaced.length) { this.showNotif('Place all your units first!', 'warn'); return; }
+
+    state.finishTeamDeploy();
+
+    if (state.phase === 'playing') {
+      // Both teams deployed — start battle
+      this._exitDeployPhase();
+    } else {
+      // Team 1's turn — AI or human
+      if (this.mode === 'ai' && state.deployingTeam === 1) {
+        // AI auto-deploys
+        state.autoDeployTeam(1);
+        state.finishTeamDeploy();
+        this._exitDeployPhase();
+      } else {
+        // Local or online: next human deploys
+        this._enterDeployPhase();
+      }
+    }
+  },
+
+  _exitDeployPhase() {
+    document.getElementById('deploy-section').style.display  = 'none';
+    document.getElementById('actions-section').style.display = 'block';
+    document.getElementById('stats-section').style.display   = 'flex';
+    this.renderer.deployHighlights = [];
+    this._deploySelectedUnit = null;
+    this._updateAllPanels();
+  },
+
+  _updateDeployBanner() {
+    const state  = this.engine;
+    const banner = document.getElementById('turn-banner');
+    if (!banner || state.phase !== 'deploy') return;
+    const team  = state.deployingTeam;
+    const color = TEAM_COLORS[team];
+    const placed = state.units.filter(u => u.team === team && u.deployed).length;
+    const total  = state.units.filter(u => u.team === team).length;
+    banner.innerHTML = `⚔ Deploy Phase — <span style="color:${color}">${state.players[team].name}</span> — Place your units (${placed}/${total} placed)`;
+    banner.className = `turn-banner team-${team}`;
   },
 
   // ─── Game canvas events ─────────────────────────────────
@@ -244,11 +388,21 @@ const UI = {
   },
 
   _onClick(e) {
-    if (!this.engine || this.engine.phase !== 'playing') return;
+    if (!this.engine) return;
     const state = this.engine;
     const grid  = this.renderer.screenToGrid(e.clientX, e.clientY);
     const { x, y } = grid;
     if (!state._inBounds(x, y)) return;
+
+    // Deploy phase
+    if (state.phase === 'deploy') {
+      // Only let the current deploying team's human interact
+      const isMyDeploy = this.mode !== 'online' || state.deployingTeam === this.myTeam;
+      if (isMyDeploy) this._handleDeployClick(x, y);
+      return;
+    }
+
+    if (state.phase !== 'playing') return;
 
     const activeUnit = state.getActiveUnit();
     const clickedUnit = state.getUnitAt(x, y);
@@ -699,6 +853,7 @@ const UI = {
     if (!state) return;
     const banner = document.getElementById('turn-banner');
     if (!banner) return;
+    if (state.phase === 'deploy') { this._updateDeployBanner(); return; }
     if (state.phase === 'gameover') {
       banner.innerHTML = `🏆 <strong>${state.players[state.winner].name} Wins!</strong> — Round ${state.turn}`;
       banner.className = 'turn-banner gameover';
@@ -936,15 +1091,15 @@ const UI = {
     this.closeGameMenu();
     document.getElementById('gameover-overlay').style.display = 'none';
     if (this.rafId) cancelAnimationFrame(this.rafId);
-    // Re-use same mode and same squads, just rebuild the map
-    const savedMode  = this.mode;
-    const savedDraft = this.armyDraft;
     this.engine    = null;
     this.renderer  = null;
     this.aiQueue   = [];
     this.aiRunning = false;
-    this.armyDraft = savedDraft;
-    this.mode      = savedMode;
+    // Reset deploy panel state
+    document.getElementById('deploy-section').style.display  = 'none';
+    document.getElementById('actions-section').style.display = 'block';
+    document.getElementById('stats-section').style.display   = 'flex';
+    this._deploySelectedUnit = null;
     this.showScreen('screen-battlefield');
     this.initBattlefieldSetup();
   },
@@ -957,6 +1112,10 @@ const UI = {
     this.renderer  = null;
     this.aiQueue   = [];
     this.aiRunning = false;
+    this._deploySelectedUnit = null;
+    document.getElementById('deploy-section').style.display  = 'none';
+    document.getElementById('actions-section').style.display = 'block';
+    document.getElementById('stats-section').style.display   = 'flex';
     if (this.mp) { this.mp.destroy(); this.mp = null; }
     this.showScreen('screen-menu');
   },

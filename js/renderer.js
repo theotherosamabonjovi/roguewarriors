@@ -12,6 +12,7 @@ class Renderer {
     // Highlight overlays
     this.moveHighlights   = []; // [{x,y}]
     this.attackHighlights = []; // unit ids
+    this.deployHighlights = []; // [{x,y}] valid drop tiles during deploy
     this.hoverTile        = null;
     this.selectedUnit     = null;
     this.lastResult       = null; // last combat result for flash
@@ -36,6 +37,12 @@ class Renderer {
       for (let c = 0; c < CFG.COLS; c++) {
         this._drawTile(state, c, r);
       }
+    }
+
+    // Draw deploy zones + highlights during deploy phase
+    if (state.phase === 'deploy') {
+      this._drawDeployZoneFull(state);
+      if (this.deployHighlights && this.deployHighlights.length) this._drawDeployHighlights();
     }
 
     // Draw move range
@@ -574,6 +581,56 @@ class Renderer {
   triggerFlash(unitId) {
     this.flashUnit  = unitId;
     this.flashTimer = 30;
+  }
+
+  _drawDeployZoneFull(state) {
+    const ctx = this.ctx;
+    const T   = this.T;
+    const { COLS, ROWS } = CFG;
+
+    // Team 0 zone: cols 0-3
+    ctx.save();
+    ctx.fillStyle = 'rgba(58,158,255,0.10)';
+    ctx.fillRect(0, 0, T * 4, ROWS * T);
+    if (state.deployingTeam === 0) {
+      ctx.strokeStyle = 'rgba(58,158,255,0.7)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(1, 1, T * 4 - 2, ROWS * T - 2);
+      ctx.fillStyle = 'rgba(58,158,255,0.9)';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('ALPHA DEPLOY ZONE', T * 2, 14);
+    }
+    ctx.restore();
+
+    // Team 1 zone: cols COLS-4 to COLS-1
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,69,69,0.10)';
+    ctx.fillRect(T * (COLS - 4), 0, T * 4, ROWS * T);
+    if (state.deployingTeam === 1) {
+      ctx.strokeStyle = 'rgba(255,69,69,0.7)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(T * (COLS - 4) + 1, 1, T * 4 - 2, ROWS * T - 2);
+      ctx.fillStyle = 'rgba(255,69,69,0.9)';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('BRAVO DEPLOY ZONE', T * (COLS - 2), 14);
+    }
+    ctx.restore();
+  }
+
+  _drawDeployHighlights() {
+    const ctx = this.ctx;
+    const T   = this.T;
+    ctx.save();
+    ctx.fillStyle   = 'rgba(255,255,100,0.18)';
+    ctx.strokeStyle = 'rgba(255,255,100,0.7)';
+    ctx.lineWidth   = 1.5;
+    for (const { x, y } of this.deployHighlights) {
+      ctx.fillRect(x * T + 1, y * T + 1, T - 2, T - 2);
+      ctx.strokeRect(x * T + 1.5, y * T + 1.5, T - 3, T - 3);
+    }
+    ctx.restore();
   }
 
   // ─── Coordinate helpers ───────────────────────────────────

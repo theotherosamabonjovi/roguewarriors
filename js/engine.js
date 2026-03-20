@@ -142,36 +142,98 @@ class Engine {
     };
   }
 
-  deployUnits() {
-    // Clear existing units
+  // ─── Deployment ───────────────────────────────────────────
+  // Stage 1: create all units as "unplaced" and enter deploy phase
+  startDeploy() {
     this.units = [];
-    const { ROWS } = CFG;
+    this.phase = 'deploy';
+    this.deployingTeam = 0;          // which team is currently placing
 
-    // Player 0 deploys on left (cols 0–1)
-    const p0units = this.players[0].squadDef;
-    p0units.forEach((type, i) => {
-      const x = i % 2;
-      const y = 1 + Math.floor(i / 2) * 2;
-      const safeY = Math.min(y, ROWS - 2);
-      this.units.push(this.createUnit(type, 0, x, safeY));
+    // Create all units with x=-1,y=-1 (not yet on board)
+    [0, 1].forEach(team => {
+      this.players[team].squadDef.forEach((type, i) => {
+        this.units.push({ ...this.createUnit(type, team, -1, -1), deployed: false });
+      });
     });
 
-    // Player 1 deploys on right (cols COLS-2–COLS-1)
-    const p1units = this.players[1].squadDef;
-    const rightStart = CFG.COLS - 2;
-    p1units.forEach((type, i) => {
-      const x = rightStart + (i % 2);
-      const y = 1 + Math.floor(i / 2) * 2;
-      const safeY = Math.min(y, ROWS - 2);
-      this.units.push(this.createUnit(type, 1, x, safeY));
-    });
+    this.addLog(`⚔ Deploy Phase — ${this.players[0].name}: place your units in the blue zone`, 'system');
+  }
 
-    this.phase = 'playing';
-    this.turn  = 1;
-    this.currentPlayer = 0;
+  // Valid deployment tiles for a team
+  deployZone(team) {
+    const { COLS, ROWS } = CFG;
+    const tiles = [];
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const inZone = team === 0 ? c <= 3 : c >= COLS - 4;
+        if (!inZone) continue;
+        if (this.board[r][c].type === TILE.BUILDING) continue;
+        if (this.getUnitAt(c, r)) continue;
+        tiles.push({ x: c, y: r });
+      }
+    }
+    return tiles;
+  }
+
+  // Place a single unit during deployment
+  placeUnit(unit, x, y) {
+    if (!this._inBounds(x, y)) return false;
+    if (this.board[y][x].type === TILE.BUILDING) return false;
+    if (this.getUnitAt(x, y)) return false;
+    const inZone = unit.team === 0 ? x <= 3 : x >= CFG.COLS - 4;
+    if (!inZone) return false;
+
+    unit.x        = x;
+    unit.y        = y;
+    unit.deployed = true;
+    this.addLog(`${unit.name} placed at (${x},${y})`, 'move');
+    return true;
+  }
+
+  unplaceUnit(unit) {
+    unit.x        = -1;
+    unit.y        = -1;
+    unit.deployed = false;
+  }
+
+  // All units for current deploying team have been placed — advance
+  finishTeamDeploy() {
+    if (this.deployingTeam === 0) {
+      this.deployingTeam = 1;
+      this.addLog(`⚔ ${this.players[1].name}: place your units in the red zone`, 'system');
+    } else {
+      this._beginBattle();
+    }
+  }
+
+  // Auto-place remaining units for a team (used by AI)
+  autoDeployTeam(team) {
+    const unplaced = this.units.filter(u => u.team === team && !u.deployed);
+    const zone     = this.deployZone(team);
+    let zoneIdx    = 0;
+    for (const u of unplaced) {
+      while (zoneIdx < zone.length && this.getUnitAt(zone[zoneIdx].x, zone[zoneIdx].y)) zoneIdx++;
+      if (zoneIdx >= zone.length) break;
+      this.placeUnit(u, zone[zoneIdx].x, zone[zoneIdx].y);
+      zoneIdx++;
+    }
+  }
+
+  _beginBattle() {
+    this.phase           = 'playing';
+    this.turn            = 1;
+    this.currentPlayer   = 0;
     this.activatedThisRound = new Set();
-    this.activeUnit = null;
-    this.addLog(`Round 1 begins — ${this.players[0].name} activates first`, 'system');
+    this.activeUnit      = null;
+    this.addLog(`═══ Round 1 begins — ${this.players[0].name} activates first ═══`, 'system');
+  }
+
+  // Legacy auto-deploy (kept for any internal use)
+  deployUnits() {
+    this.startDeploy();
+    this.autoDeployTeam(0);
+    this.autoDeployTeam(1);
+    this._beginBattle();
   }
 
   // ─── Movement ─────────────────────────────────────────────
