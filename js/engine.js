@@ -1,0 +1,530 @@
+// ============================================================
+//  ROGUE WARRIORS DIGITAL — ENGINE
+// ============================================================
+
+class Engine {
+  constructor() {
+    this.reset();
+  }
+
+  reset() {
+    this.board      = [];   // [row][col] = { type, building, cover, terrain }
+    this.buildings  = [];   // [{x,y,w,h,type}]
+    this.coverObjs  = [];   // [{x,y,type}]
+    this.units      = [];   // Unit objects
+    this.players    = [
+      { name: TEAM_NAMES[0], team: 0, squadDef: [] },
+      { name: TEAM_NAMES[1], team: 1, squadDef: [] },
+    ];
+    this.theme      = 'urban';
+    this.phase      = 'setup';       // setup | deploy | playing | gameover
+    this.turn       = 1;
+    this.currentPlayer = 0;
+    this.activeUnit    = null;       // currently activated unit id
+    this.actionsLeft   = MAX_ACTIONS;
+    this.hasMoved      = false;
+    this.hasSprinted   = false;
+    this.isAiming      = false;
+    this.activatedThisRound = new Set(); // unit ids activated this round
+    this.log           = [];
+    this.winner        = null;
+    this.mode          = 'ai';       // ai | local | online
+    this.abilityUsed   = new Set();  // unit ids that used ability this game
+    this.revivedUnits  = new Set();  // medic heal tracking
+    this.overwatchUnits = new Set(); // sniper overwatch
+    this._uidCounter   = 0;
+  }
+
+  // ─── Board generation ─────────────────────────────────────
+  generateBoard(theme = 'urban', density = 'medium') {
+    this.theme = theme;
+    const { COLS, ROWS } = CFG;
+    this.board     = [];
+    this.buildings = [];
+    this.coverObjs = [];
+
+    // Init all tiles as open
+    for (let r = 0; r < ROWS; r++) {
+      this.board[r] = [];
+      for (let c = 0; c < COLS; c++) {
+        this.board[r][c] = { type: TILE.OPEN, buildingId: -1, coverId: -1 };
+      }
+    }
+
+    const densityMap = { light: [3,4], medium: [5,7], heavy: [8,11] };
+    const [minB, maxB] = densityMap[density] || densityMap.medium;
+    const numBuildings = minB + Math.floor(Math.random() * (maxB - minB + 1));
+
+    // Place buildings — keep deployment zones (cols 0-2 and COLS-3–COLS-1) clear
+    for (let b = 0; b < numBuildings * 3; b++) {
+      if (this.buildings.length >= numBuildings) break;
+      const w = 2 + Math.floor(Math.random() * 3);
+      const h = 2 + Math.floor(Math.random() * 3);
+      const x = 3 + Math.floor(Math.random() * (COLS - 6 - w));
+      const y = 1 + Math.floor(Math.random() * (ROWS - 2 - h));
+      if (this._canPlace(x, y, w, h, 1)) {
+        const id = this.buildings.length;
+        this.buildings.push({ id, x, y, w, h });
+        for (let dy = 0; dy < h; dy++) {
+          for (let dx = 0; dx < w; dx++) {
+            this.board[y + dy][x + dx] = { type: TILE.BUILDING, buildingId: id, coverId: -1 };
+          }
+        }
+      }
+    }
+
+    // Place cover objects (sandbags, crates, barriers)
+    const numCover = 8 + Math.floor(Math.random() * 8);
+    for (let i = 0; i < numCover * 4; i++) {
+      if (this.coverObjs.length >= numCover) break;
+      const x = 1 + Math.floor(Math.random() * (COLS - 2));
+      const y = 1 + Math.floor(Math.random() * (ROWS - 2));
+      const tileTypes = ['sandbag', 'crate', 'barrier', 'wall'];
+      const type = tileTypes[Math.floor(Math.random() * tileTypes.length)];
+      if (this.board[y][x].type === TILE.OPEN) {
+        const id = this.coverObjs.length;
+        this.coverObjs.push({ id, x, y, type });
+        this.board[y][x] = { type: TILE.COVER, buildingId: -1, coverId: id };
+      }
+    }
+
+    // Place rubble near buildings occasionally
+    if (theme === 'urban') {
+      for (const bld of this.buildings) {
+        if (Math.random() < 0.5) {
+          const rx = bld.x + bld.w + (Math.random() < 0.5 ? 0 : 1);
+          const ry = bld.y + Math.floor(bld.h / 2);
+          if (this._inBounds(rx, ry) && this.board[ry][rx].type === TILE.OPEN) {
+            this.board[ry][rx] = { type: TILE.RUBBLE, buildingId: -1, coverId: -1 };
+          }
+        }
+      }
+    }
+  }
+
+  _canPlace(x, y, w, h, margin) {
+    const { COLS, ROWS } = CFG;
+    if (x - margin < 0 || y - margin < 0 || x + w + margin > COLS || y + h + margin > ROWS) return false;
+    for (let dy = -margin; dy < h + margin; dy++) {
+      for (let dx = -margin; dx < w + margin; dx++) {
+        const cx = x + dx, cy = y + dy;
+        if (this._inBounds(cx, cy) && this.board[cy][cx].type !== TILE.OPEN) return false;
+      }
+    }
+    return true;
+  }
+
+  _inBounds(x, y) {
+    return x >= 0 && y >= 0 && x < CFG.COLS && y < CFG.ROWS;
+  }
+
+  // ─── Unit creation ────────────────────────────────────────
+  createUnit(type, team, x, y) {
+    const def = UNIT_DEFS[type];
+    if (!def) throw new Error('Unknown unit type: ' + type);
+    const id = 'u' + (++this._uidCounter);
+    return {
+      id, type, team,
+      name: def.name,
+      x, y,
+      hp: def.hp, maxHp: def.hp,
+      move: def.move,
+      skill: def.skill,
+      range: def.range,
+      dice: def.dice,
+      defense: def.defense,
+      ability: def.ability,
+      // state
+      alive: true,
+      suppressed: false,
+      inCover: false,
+      aiming: false,
+    };
+  }
+
+  deployUnits() {
+    // Clear existing units
+    this.units = [];
+    const { ROWS } = CFG;
+
+    // Player 0 deploys on left (cols 0–1)
+    const p0units = this.players[0].squadDef;
+    p0units.forEach((type, i) => {
+      const x = i % 2;
+      const y = 1 + Math.floor(i / 2) * 2;
+      const safeY = Math.min(y, ROWS - 2);
+      this.units.push(this.createUnit(type, 0, x, safeY));
+    });
+
+    // Player 1 deploys on right (cols COLS-2–COLS-1)
+    const p1units = this.players[1].squadDef;
+    const rightStart = CFG.COLS - 2;
+    p1units.forEach((type, i) => {
+      const x = rightStart + (i % 2);
+      const y = 1 + Math.floor(i / 2) * 2;
+      const safeY = Math.min(y, ROWS - 2);
+      this.units.push(this.createUnit(type, 1, x, safeY));
+    });
+
+    this.phase = 'playing';
+    this.turn  = 1;
+    this.currentPlayer = 0;
+    this.activatedThisRound = new Set();
+    this.activeUnit = null;
+    this.addLog(`Round 1 begins — ${this.players[0].name} activates first`, 'system');
+  }
+
+  // ─── Movement ─────────────────────────────────────────────
+  getMovementRange(unit, isSprint = false) {
+    const dist = isSprint ? unit.move * 2 : unit.move;
+    const reachable = [];
+    const visited = {};
+    const queue = [{ x: unit.x, y: unit.y, steps: 0 }];
+    visited[`${unit.x},${unit.y}`] = true;
+
+    while (queue.length) {
+      const { x, y, steps } = queue.shift();
+      if (steps > 0) reachable.push({ x, y });
+      if (steps >= dist) continue;
+
+      for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const nx = x + dx, ny = y + dy;
+        const key = `${nx},${ny}`;
+        if (!this._inBounds(nx, ny)) continue;
+        if (visited[key]) continue;
+        const tile = this.board[ny][nx];
+        if (tile.type === TILE.BUILDING) continue;
+        if (this.getUnitAt(nx, ny)) continue;
+        visited[key] = true;
+        queue.push({ x: nx, y: ny, steps: steps + 1 });
+      }
+    }
+    return reachable;
+  }
+
+  moveUnit(unit, x, y) {
+    const tile = this.board[y][x];
+    unit.x = x;
+    unit.y = y;
+    // Check if now in cover
+    unit.inCover = (tile.type === TILE.COVER || tile.type === TILE.RUBBLE);
+    unit.suppressed = false;
+    this.addLog(`${unit.name} (${this.players[unit.team].name}) moves to (${x},${y})`, 'move');
+  }
+
+  // ─── Line of Sight ────────────────────────────────────────
+  hasLOS(ax, ay, bx, by) {
+    // Bresenham ray cast — blocked by buildings
+    const steps = Math.max(Math.abs(bx - ax), Math.abs(by - ay)) * 2;
+    if (steps === 0) return true;
+    for (let i = 1; i < steps; i++) {
+      const t  = i / steps;
+      const cx = Math.round(ax + (bx - ax) * t);
+      const cy = Math.round(ay + (by - ay) * t);
+      if (!this._inBounds(cx, cy)) return false;
+      if (cx === bx && cy === by) continue;  // don't block on target tile
+      if (this.board[cy][cx].type === TILE.BUILDING) return false;
+    }
+    return true;
+  }
+
+  // ─── Combat ───────────────────────────────────────────────
+  getValidTargets(attacker) {
+    const alive = this.units.filter(u => u.alive && u.team !== attacker.team);
+    return alive.filter(t => {
+      const dist = this._dist(attacker, t);
+      if (dist > attacker.range) return false;
+      return this.hasLOS(attacker.x, attacker.y, t.x, t.y);
+    });
+  }
+
+  _dist(a, b) {
+    return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)); // Chebyshev
+  }
+
+  resolveShoot(attacker, target, extraHitBonus = 0) {
+    const dist = this._dist(attacker, target);
+    let targetNum = attacker.skill;
+
+    // Range penalty
+    const shortRange = Math.floor(attacker.range / 3);
+    const longRange  = Math.floor(attacker.range * 2 / 3);
+    if (dist > longRange)       targetNum += 2;
+    else if (dist > shortRange) targetNum += 1;
+
+    // Cover bonus to defender
+    let coverBonus = 0;
+    if (target.inCover)   coverBonus += 1;
+    const tile = this.board[target.y][target.x];
+    if (tile.type === TILE.COVER || tile.type === TILE.RUBBLE) coverBonus += 1;
+
+    // Suppression penalty
+    if (attacker.suppressed) targetNum += 1;
+
+    // Aiming bonus
+    if (attacker.aiming || extraHitBonus) targetNum -= (extraHitBonus || 1);
+    targetNum = Math.max(2, Math.min(6, targetNum));
+
+    // Command Aura: check if friendly leader nearby
+    const hasLeaderAura = this.units.some(u =>
+      u.alive && u.team === attacker.team && u.ability === 'command' &&
+      u.id !== attacker.id && this._dist(attacker, u) <= 3
+    );
+
+    // Roll attack dice
+    const rolls = [];
+    for (let i = 0; i < attacker.dice; i++) {
+      rolls.push(this.rollD6());
+    }
+
+    // Leader reroll one failed die
+    let hitCount = rolls.filter(r => r >= targetNum).length;
+    let finalRolls = [...rolls];
+    let rerolled = null;
+    if (hasLeaderAura && hitCount < rolls.length) {
+      // Reroll one failed die
+      const failIdx = finalRolls.findIndex(r => r < targetNum);
+      const newRoll = this.rollD6();
+      rerolled = { idx: failIdx, from: finalRolls[failIdx], to: newRoll };
+      finalRolls[failIdx] = newRoll;
+      hitCount = finalRolls.filter(r => r >= targetNum).length;
+    }
+
+    // Each hit: target makes defense save
+    const saves = [];
+    let wounds = 0;
+    for (let h = 0; h < hitCount; h++) {
+      const save = this.rollD6();
+      saves.push(save);
+      const saveTarget = target.defense - coverBonus;
+      if (save < saveTarget) {
+        wounds++;
+        // Stealth rule: if scout in cover, enemy needs 6 to hit
+        if (target.ability === 'stealth' && target.inCover) {
+          if (save < 6) { wounds--; } // cancel wound unless 6
+        }
+      } else {
+        // Saved: unit may be suppressed
+        if (Math.random() < 0.3) target.suppressed = true;
+      }
+    }
+
+    const result = {
+      attacker: attacker.id, target: target.id,
+      rolls: finalRolls, originalRolls: rolls,
+      targetNum, hitCount,
+      coverBonus, saves, wounds,
+      rerolled, hasLeaderAura,
+    };
+
+    if (wounds > 0) {
+      target.hp -= wounds;
+      if (target.hp <= 0) {
+        target.alive = false;
+        target.hp = 0;
+        this.addLog(`💀 ${target.name} is eliminated!`, 'death');
+      } else {
+        target.suppressed = true;
+        this.addLog(`${target.name} is hit and suppressed!`, 'hit');
+      }
+    } else {
+      if (hitCount > 0) {
+        this.addLog(`${target.name} saves the hit!`, 'miss');
+      } else {
+        this.addLog(`${attacker.name} misses!`, 'miss');
+      }
+    }
+
+    attacker.aiming = false;
+    return result;
+  }
+
+  resolveBlast(attacker, cx, cy) {
+    // Grenadier blast: hits target + adjacent tiles
+    const affected = [];
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const tx = cx + dx, ty = cy + dy;
+        const target = this.getUnitAt(tx, ty);
+        if (target && target.alive && target.team !== attacker.team) {
+          affected.push(target);
+        }
+      }
+    }
+    const results = affected.map(t => this.resolveShoot(attacker, t, 1));
+    this.addLog(`💥 ${attacker.name} throws grenade at (${cx},${cy}) — ${affected.length} caught in blast!`, 'ability');
+    return results;
+  }
+
+  resolveMelee(attacker, target) {
+    const aRoll = this.rollD6() + (attacker.ability === 'command' ? 1 : 0);
+    const dRoll = this.rollD6();
+    this.addLog(`⚔️ ${attacker.name} charges ${target.name}! [${aRoll} vs ${dRoll}]`, 'melee');
+    if (aRoll > dRoll) {
+      target.alive = false;
+      target.hp = 0;
+      this.addLog(`💀 ${target.name} is taken down in melee!`, 'death');
+      return { winner: attacker, aRoll, dRoll };
+    } else if (dRoll > aRoll) {
+      attacker.suppressed = true;
+      this.addLog(`${attacker.name} is repelled and suppressed!`, 'hit');
+      return { winner: target, aRoll, dRoll };
+    } else {
+      attacker.suppressed = true;
+      target.suppressed = true;
+      this.addLog(`Melee tied — both units suppressed!`, 'miss');
+      return { winner: null, aRoll, dRoll };
+    }
+  }
+
+  // Medic ability
+  tryHeal(medic, targetUnit) {
+    if (this.revivedUnits.has(medic.id)) {
+      this.addLog(`${medic.name} has already used their heal!`, 'system');
+      return false;
+    }
+    if (this._dist(medic, targetUnit) > 1) {
+      this.addLog(`Target too far to heal!`, 'system');
+      return false;
+    }
+    if (targetUnit.alive) {
+      // Remove suppression
+      targetUnit.suppressed = false;
+      this.addLog(`💉 ${medic.name} patches up ${targetUnit.name}!`, 'ability');
+    } else {
+      // Revive with 1hp if adjacent
+      targetUnit.alive = true;
+      targetUnit.hp = 1;
+      this.addLog(`💉 ${medic.name} revives ${targetUnit.name}!`, 'ability');
+    }
+    this.revivedUnits.add(medic.id);
+    return true;
+  }
+
+  setOverwatch(sniper) {
+    this.overwatchUnits.add(sniper.id);
+    this.addLog(`🔭 ${sniper.name} sets up Overwatch!`, 'ability');
+  }
+
+  // ─── Turn management ──────────────────────────────────────
+  activateUnit(unit) {
+    if (unit.team !== this.currentPlayer) return false;
+    if (this.activatedThisRound.has(unit.id)) return false;
+    if (!unit.alive) return false;
+    this.activeUnit   = unit.id;
+    this.actionsLeft  = MAX_ACTIONS;
+    this.hasMoved     = false;
+    this.hasSprinted  = false;
+    this.isAiming     = false;
+    unit.aiming       = false;
+    this.addLog(`— ${unit.name} activated (${MAX_ACTIONS} actions)`, 'activate');
+    return true;
+  }
+
+  useAction(cost = 1) {
+    this.actionsLeft -= cost;
+    if (this.actionsLeft <= 0) this.endActivation();
+  }
+
+  endActivation() {
+    if (!this.activeUnit) return;
+    const unit = this.getUnit(this.activeUnit);
+    if (unit) this.activatedThisRound.add(unit.id);
+    this.activeUnit  = null;
+    this.actionsLeft = 0;
+    this.isAiming    = false;
+
+    // Check win before swapping
+    const winner = this.checkWin();
+    if (winner !== null) {
+      this.phase  = 'gameover';
+      this.winner = winner;
+      this.addLog(`🏆 ${this.players[winner].name} wins!`, 'system');
+      return;
+    }
+
+    // Switch player
+    this.currentPlayer = 1 - this.currentPlayer;
+
+    // Check if current player still has units to activate
+    const canActivate = this.units.some(u =>
+      u.alive && u.team === this.currentPlayer && !this.activatedThisRound.has(u.id)
+    );
+    if (!canActivate) {
+      // Other player also done?
+      const otherCanActivate = this.units.some(u =>
+        u.alive && u.team === (1 - this.currentPlayer) && !this.activatedThisRound.has(u.id)
+      );
+      if (otherCanActivate) {
+        this.currentPlayer = 1 - this.currentPlayer;
+      } else {
+        // New round
+        this.newRound();
+        return;
+      }
+    }
+    this.addLog(`${this.players[this.currentPlayer].name}'s turn`, 'system');
+  }
+
+  newRound() {
+    this.turn++;
+    this.activatedThisRound = new Set();
+    this.overwatchUnits     = new Set();
+    // Clear per-round states
+    this.units.forEach(u => {
+      if (u.alive) {
+        u.suppressed = false;
+        u.aiming     = false;
+      }
+    });
+    this.currentPlayer = 0;
+    this.addLog(`═══ Round ${this.turn} begins ═══`, 'system');
+  }
+
+  checkWin() {
+    const p0alive = this.units.some(u => u.alive && u.team === 0);
+    const p1alive = this.units.some(u => u.alive && u.team === 1);
+    if (!p0alive) return 1;
+    if (!p1alive) return 0;
+    return null;
+  }
+
+  // ─── Utilities ────────────────────────────────────────────
+  getUnit(id) { return this.units.find(u => u.id === id) || null; }
+
+  getActiveUnit() { return this.activeUnit ? this.getUnit(this.activeUnit) : null; }
+
+  getUnitAt(x, y) { return this.units.find(u => u.alive && u.x === x && u.y === y) || null; }
+
+  rollD6() { return 1 + Math.floor(Math.random() * 6); }
+
+  addLog(text, type = 'info') {
+    this.log.push({ text, type, turn: this.turn, time: Date.now() });
+    if (this.log.length > 80) this.log.shift();
+  }
+
+  // Serialise state for multiplayer sync
+  serialize() {
+    return JSON.stringify({
+      board: this.board, buildings: this.buildings, coverObjs: this.coverObjs,
+      units: this.units, players: this.players,
+      theme: this.theme, phase: this.phase, turn: this.turn,
+      currentPlayer: this.currentPlayer, activeUnit: this.activeUnit,
+      actionsLeft: this.actionsLeft, hasMoved: this.hasMoved,
+      hasSprinted: this.hasSprinted, isAiming: this.isAiming,
+      activatedThisRound: [...this.activatedThisRound],
+      winner: this.winner, log: this.log.slice(-20),
+      abilityUsed: [...this.abilityUsed], revivedUnits: [...this.revivedUnits],
+      overwatchUnits: [...this.overwatchUnits], _uidCounter: this._uidCounter,
+    });
+  }
+
+  deserialize(str) {
+    const d = JSON.parse(str);
+    Object.assign(this, d);
+    this.activatedThisRound = new Set(d.activatedThisRound);
+    this.abilityUsed        = new Set(d.abilityUsed);
+    this.revivedUnits       = new Set(d.revivedUnits);
+    this.overwatchUnits     = new Set(d.overwatchUnits);
+  }
+}
