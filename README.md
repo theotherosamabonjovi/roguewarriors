@@ -2,58 +2,7 @@
 
 https://theotherosamabonjovi.github.io/roguewarriors/
 
-A browser-based tactical skirmish game adapted from the *Rogue Warriors: A Modern Warfare Skirmish Game* ruleset by Tabletop Skirmish Games.
-
-## 🚀 Deploying to GitHub Pages
-
-### Step 1 — Create a GitHub repository
-1. Go to [github.com](https://github.com) and sign in
-2. Click **+** → **New repository**
-3. Name it `rogue-warriors` (or anything you like)
-4. Set it to **Public**
-5. Click **Create repository**
-
-### Step 2 — Upload the files
-Upload all these files, preserving the folder structure:
-```
-index.html
-css/
-  game.css
-js/
-  config.js
-  engine.js
-  renderer.js
-  ai.js
-  multiplayer.js
-  ui.js
-```
-
-**Via GitHub web UI:**
-1. On your repo page, click **Add file → Upload files**
-2. Drag the entire folder contents in, or upload files individually
-3. Make sure `css/` and `js/` folders are maintained
-4. Click **Commit changes**
-
-**Via Git CLI:**
-```bash
-git init
-git add .
-git commit -m "Initial Rogue Warriors deploy"
-git remote add origin https://github.com/YOUR_USERNAME/rogue-warriors.git
-git push -u origin main
-```
-
-### Step 3 — Enable GitHub Pages
-1. Go to your repo → **Settings → Pages**
-2. Under **Source**, select **Deploy from a branch**
-3. Choose branch: `main`, folder: `/ (root)`
-4. Click **Save**
-5. Wait ~2 minutes, then visit: `https://YOUR_USERNAME.github.io/rogue-warriors/`
-
-Share that URL with friends to play!
-
----
-
+A browser-based tactical skirmish game adapted from the *Rogue Warriors: A Modern Warfare Skirmish Game* ruleset by Tabletop Skirmish Games
 ## 🎮 How to Play
 
 ### Game Modes
