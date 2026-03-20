@@ -219,8 +219,12 @@
      SCREEN: GAME
 ──────────────────────────────────────────────────────────────── -->
 <div id="screen-game" class="screen">
-  <!-- Turn banner -->
-  <div id="turn-banner" class="turn-banner">Rogue Warriors</div>
+  <!-- Top bar: turn banner + menu button -->
+  <div class="top-bar">
+    <button class="game-menu-btn" onclick="UI.openGameMenu()" title="Menu">☰ Menu</button>
+    <div id="turn-banner" class="turn-banner">Rogue Warriors</div>
+    <div class="top-bar-spacer"></div>
+  </div>
 
   <div id="game-layout">
     <!-- LEFT PANEL: Actions -->
@@ -265,6 +269,19 @@
         <div style="flex:1; overflow:auto; min-height:0;">
           <div id="combat-log"></div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- In-Game Menu Overlay -->
+  <div id="game-menu-overlay">
+    <div class="game-menu-card">
+      <div class="gm-title">⚔ Game Menu</div>
+      <div class="gm-round" id="game-menu-round"></div>
+      <div class="gm-buttons">
+        <button class="btn btn-ghost gm-btn" onclick="UI.closeGameMenu()">▶ Resume Game</button>
+        <button class="btn btn-blue  gm-btn" onclick="UI.newGameFromMenu()">🔄 New Game (same mode)</button>
+        <button class="btn btn-gold  gm-btn" onclick="UI.mainMenuFromMenu()">🏠 Main Menu</button>
       </div>
     </div>
   </div>
@@ -341,6 +358,19 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   console.log('%c⚔ Rogue Warriors Digital — Loaded', 'color:#ffbe0b; font-size:16px; font-weight:bold;');
+
+  // Escape key toggles in-game menu
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const overlay = document.getElementById('game-menu-overlay');
+      if (!overlay) return;
+      if (overlay.classList.contains('open')) {
+        UI.closeGameMenu();
+      } else if (document.getElementById('screen-game').classList.contains('active')) {
+        UI.openGameMenu();
+      }
+    }
+  });
 });
 
 // Show room code box on host

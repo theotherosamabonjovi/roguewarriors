@@ -913,6 +913,54 @@ const UI = {
       `Alpha Team: ${alive0} survivors · Bravo Team: ${alive1} survivors`;
   },
 
+  // ─── In-game menu ────────────────────────────────────────────
+  openGameMenu() {
+    const overlay = document.getElementById('game-menu-overlay');
+    const round   = document.getElementById('game-menu-round');
+    if (round && this.engine) {
+      const phase = this.engine.phase;
+      const turn  = this.engine.turn;
+      const cp    = this.engine.players[this.engine.currentPlayer]?.name || '';
+      round.textContent = phase === 'gameover'
+        ? `Game over — Round ${turn}`
+        : `Round ${turn} · ${cp}'s turn`;
+    }
+    overlay.classList.add('open');
+  },
+
+  closeGameMenu() {
+    document.getElementById('game-menu-overlay').classList.remove('open');
+  },
+
+  newGameFromMenu() {
+    this.closeGameMenu();
+    document.getElementById('gameover-overlay').style.display = 'none';
+    if (this.rafId) cancelAnimationFrame(this.rafId);
+    // Re-use same mode and same squads, just rebuild the map
+    const savedMode  = this.mode;
+    const savedDraft = this.armyDraft;
+    this.engine    = null;
+    this.renderer  = null;
+    this.aiQueue   = [];
+    this.aiRunning = false;
+    this.armyDraft = savedDraft;
+    this.mode      = savedMode;
+    this.showScreen('screen-battlefield');
+    this.initBattlefieldSetup();
+  },
+
+  mainMenuFromMenu() {
+    this.closeGameMenu();
+    document.getElementById('gameover-overlay').style.display = 'none';
+    if (this.rafId) cancelAnimationFrame(this.rafId);
+    this.engine    = null;
+    this.renderer  = null;
+    this.aiQueue   = [];
+    this.aiRunning = false;
+    if (this.mp) { this.mp.destroy(); this.mp = null; }
+    this.showScreen('screen-menu');
+  },
+
   playAgain() {
     document.getElementById('gameover-overlay').style.display = 'none';
     if (this.rafId) cancelAnimationFrame(this.rafId);

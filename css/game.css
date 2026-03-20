@@ -496,6 +496,53 @@ html, body {
 .btn-back  { background: none; border: none; color: var(--text2); cursor: pointer; font-size: 14px; padding: 6px 0; }
 .btn-back:hover { color: var(--text); }
 
+/* ─── Top bar (turn banner + menu button) ───────────────────── */
+.top-bar {
+  display: flex; align-items: stretch;
+  background: var(--bg2); border-bottom: 1px solid var(--border);
+  flex-shrink: 0; min-height: 34px;
+}
+
+.game-menu-btn {
+  padding: 0 14px;
+  background: var(--bg3); border: none; border-right: 1px solid var(--border);
+  color: var(--text2); font-size: 13px; font-weight: 600;
+  cursor: pointer; letter-spacing: 1px; white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+.game-menu-btn:hover { background: var(--bg); color: var(--text); }
+
+.top-bar .turn-banner {
+  flex: 1; border-bottom: none;
+  background: transparent;
+}
+
+.top-bar-spacer {
+  width: 88px; /* mirrors the menu button width so banner stays centred */
+  flex-shrink: 0;
+}
+
+/* ─── In-game menu modal ─────────────────────────────────────── */
+#game-menu-overlay {
+  display: none; position: fixed; inset: 0; z-index: 600;
+  background: rgba(0,0,0,0.75); backdrop-filter: blur(4px);
+  align-items: center; justify-content: center;
+}
+#game-menu-overlay.open { display: flex; }
+
+.game-menu-card {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 14px; padding: 40px 52px;
+  display: flex; flex-direction: column; align-items: center; gap: 18px;
+  animation: fadeIn 0.2s ease; min-width: 300px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+}
+.gm-title { font-size: 26px; font-weight: 800; letter-spacing: 3px; }
+.gm-round { font-size: 13px; color: var(--text2); }
+.gm-buttons { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+.gm-btn    { width: 100%; padding: 12px 20px; font-size: 14px; text-align: center; }
+
 /* ─── Misc ───────────────────────────────────────────────────── */
 h2 { font-size: 24px; font-weight: 700; letter-spacing: 2px; }
 .spacer { flex: 1; }
