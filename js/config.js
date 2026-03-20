@@ -86,3 +86,31 @@ const ACTIONS = {
 };
 
 const MAX_ACTIONS = 2;
+
+// ─── Game modes ──────────────────────────────────────────────
+const GAME_MODES = {
+  elimination: {
+    id: 'elimination',
+    label: 'Elimination',
+    icon: '💀',
+    desc: 'Eliminate all enemy units to win.',
+  },
+  ctf: {
+    id: 'ctf',
+    label: 'Capture the Flag',
+    icon: '🚩',
+    desc: 'Carry the flag from the centre back to your deployment zone.',
+  },
+  bomb: {
+    id: 'bomb',
+    label: 'Plant the Bomb',
+    icon: '💣',
+    desc: 'Attackers plant the bomb at a site. Defenders must defuse it within 8 rounds.',
+  },
+  vip: {
+    id: 'vip',
+    label: 'VIP Escort',
+    icon: '👑',
+    desc: 'Alpha escorts the VIP across the map. Bravo must eliminate the VIP.',
+  },
+};

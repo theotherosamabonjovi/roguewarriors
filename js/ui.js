@@ -13,6 +13,7 @@ const UI = {
   armyBudget:  10,        // point limit
   theme:       'urban',
   density:     'medium',
+  gameMode:    'elimination',  // elimination | ctf | bomb | vip
   rafId:       null,
   aiQueue:     [],
   aiRunning:   false,
@@ -196,6 +197,136 @@ const UI = {
     this.renderBattlefieldPreview();
   },
 
+  setGameMode(gm) {
+    this.gameMode = gm;
+    document.querySelectorAll('.gamemode-btn').forEach(b => b.classList.remove('active'));
+    const btn = document.querySelector(`[data-gamemode="${gm}"]`);
+    if (btn) btn.classList.add('active');
+  },
+
+  // ─── Map editor ─────────────────────────────────────────
+  _editorBrush:    'open',
+  _editorPainting: false,
+
+  openMapEditor() {
+    const overlay = document.getElementById('map-editor-overlay');
+    overlay.style.display = 'flex';
+    this._renderEditorCanvas();
+  },
+
+  closeMapEditor() {
+    document.getElementById('map-editor-overlay').style.display = 'none';
+    // Re-render the small preview with updated map
+    if (this._previewEngine) this._renderPreviewFromEngine(this._previewEngine);
+  },
+
+  setEditorBrush(brush) {
+    this._editorBrush = brush;
+    document.querySelectorAll('.editor-brush-btn').forEach(b => b.classList.remove('active'));
+    const btn = document.querySelector(`[data-brush="${brush}"]`);
+    if (btn) btn.classList.add('active');
+  },
+
+  _renderEditorCanvas() {
+    const eng     = this._previewEngine;
+    if (!eng) return;
+    const canvas  = document.getElementById('editor-canvas');
+    const T       = 30; // editor tile size
+    canvas.width  = CFG.COLS * T;
+    canvas.height = CFG.ROWS * T;
+    const ctx     = canvas.getContext('2d');
+    const theme   = THEMES[eng.theme];
+
+    const drawAll = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (let r = 0; r < CFG.ROWS; r++) {
+        for (let c = 0; c < CFG.COLS; c++) {
+          const tile = eng.board[r][c];
+          let color  = (c + r) % 2 === 0 ? theme.base : theme.baseAlt;
+          if (tile.type === TILE.BUILDING) color = theme.buildingColor;
+          if (tile.type === TILE.COVER)    color = theme.coverColor;
+          if (tile.type === TILE.RUBBLE)   color = '#6a5040';
+          ctx.fillStyle = color;
+          ctx.fillRect(c * T, r * T, T, T);
+          ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+          ctx.lineWidth = 0.5;
+          ctx.strokeRect(c * T + 0.5, r * T + 0.5, T - 1, T - 1);
+        }
+      }
+      // Deploy zone tint
+      ctx.fillStyle = 'rgba(58,158,255,0.12)';
+      ctx.fillRect(0, 0, T * 4, CFG.ROWS * T);
+      ctx.fillStyle = 'rgba(255,69,69,0.12)';
+      ctx.fillRect(T * (CFG.COLS - 4), 0, T * 4, CFG.ROWS * T);
+    };
+
+    drawAll();
+    canvas._drawAll = drawAll;
+    canvas._eng     = eng;
+    canvas._T       = T;
+
+    // Attach paint events (only once per open)
+    if (!canvas._editorReady) {
+      canvas._editorReady = true;
+
+      const paint = (e) => {
+        if (!this._editorPainting) return;
+        const rect = canvas.getBoundingClientRect();
+        const sx   = (e.touches ? e.touches[0].clientX : e.clientX);
+        const sy   = (e.touches ? e.touches[0].clientY : e.clientY);
+        const c    = Math.floor((sx - rect.left) / (canvas._T * (rect.width  / canvas.width)));
+        const r    = Math.floor((sy - rect.top)  / (canvas._T * (rect.height / canvas.height)));
+        if (c < 0 || r < 0 || c >= CFG.COLS || r >= CFG.ROWS) return;
+        // Don't paint in deploy zones
+        if (c <= 3 || c >= CFG.COLS - 4) return;
+
+        const brush = this._editorBrush;
+        const board = canvas._eng.board;
+        const bldgs = canvas._eng.buildings;
+        const cov   = canvas._eng.coverObjs;
+
+        if (brush === 'open') {
+          board[r][c] = { type: TILE.OPEN, buildingId: -1, coverId: -1 };
+        } else if (brush === 'building') {
+          board[r][c] = { type: TILE.BUILDING, buildingId: 999, coverId: -1 };
+        } else if (brush === 'cover') {
+          const id = cov.length;
+          cov.push({ id, x: c, y: r, type: 'barrier' });
+          board[r][c] = { type: TILE.COVER, buildingId: -1, coverId: id };
+        } else if (brush === 'rubble') {
+          board[r][c] = { type: TILE.RUBBLE, buildingId: -1, coverId: -1 };
+        }
+        canvas._drawAll();
+      };
+
+      canvas.addEventListener('mousedown',  (e) => { this._editorPainting = true;  paint(e); });
+      canvas.addEventListener('mousemove',  (e) => { paint(e); });
+      canvas.addEventListener('mouseup',    ()  => { this._editorPainting = false; });
+      canvas.addEventListener('mouseleave', ()  => { this._editorPainting = false; });
+    }
+  },
+
+  _renderPreviewFromEngine(eng) {
+    const previewCanvas = document.getElementById('preview-canvas');
+    if (!previewCanvas) return;
+    const ctx = previewCanvas.getContext('2d');
+    const T   = 8;
+    previewCanvas.width  = CFG.COLS * T;
+    previewCanvas.height = CFG.ROWS * T;
+    const thm = THEMES[eng.theme];
+    for (let r = 0; r < CFG.ROWS; r++) {
+      for (let c = 0; c < CFG.COLS; c++) {
+        const tile = eng.board[r][c];
+        let color  = (c + r) % 2 === 0 ? thm.base : thm.baseAlt;
+        if (tile.type === TILE.BUILDING) color = thm.buildingColor;
+        if (tile.type === TILE.COVER)    color = thm.coverColor;
+        if (tile.type === TILE.RUBBLE)   color = '#6a5040';
+        ctx.fillStyle = color;
+        ctx.fillRect(c * T, r * T, T, T);
+      }
+    }
+  },
+
   rerollBattlefield() {
     this.renderBattlefieldPreview();
   },
@@ -206,7 +337,8 @@ const UI = {
 
     eng.players[0].squadDef = this.armyDraft[0];
     eng.players[1].squadDef = this.armyDraft[1];
-    eng.mode = this.mode;
+    eng.mode     = this.mode;
+    eng.gameMode = this.gameMode || 'elimination';
 
     this.engine   = eng;
     this.renderer = new Renderer('battlefield');
@@ -450,8 +582,21 @@ const UI = {
     }
 
     // Active unit exists
-    if (clickedUnit && clickedUnit.team === state.currentPlayer && clickedUnit.id !== activeUnit.id) {
-      // Switch to a different friendly unit? End current activation first
+    // Click on the SAME unit → deselect it
+    if (clickedUnit && clickedUnit.id === activeUnit.id) {
+      this._deactivateSelected();
+      return;
+    }
+
+    // Click on a DIFFERENT friendly unactivated unit → switch to it
+    if (clickedUnit && clickedUnit.team === state.currentPlayer &&
+        clickedUnit.alive && !state.activatedThisRound.has(clickedUnit.id)) {
+      this._deactivateSelected();
+      state.activateUnit(clickedUnit);
+      this.renderer.selectedUnit = clickedUnit;
+      this._showMoveRange(clickedUnit, false);
+      this._showAttackHighlights(clickedUnit);
+      this._updateAllPanels();
       return;
     }
 
@@ -464,14 +609,29 @@ const UI = {
       }
     }
 
-    // Click on empty tile in move range = move
+    // Click on tile in move range = move
     if (!clickedUnit) {
       const inRange = this.renderer.moveHighlights.some(t => t.x === x && t.y === y);
       if (inRange && state.actionsLeft >= 1) {
         this._doMove(activeUnit, x, y);
         return;
       }
+      // Click on empty non-move tile → deselect
+      this._deactivateSelected();
     }
+  },
+
+  // Deselect the currently active unit without consuming its activation
+  _deactivateSelected() {
+    const state = this.engine;
+    if (!state) return;
+    state.deactivateUnit();
+    this.renderer.selectedUnit     = null;
+    this.renderer.moveHighlights   = [];
+    this.renderer.attackHighlights = [];
+    this.renderer.healTargets      = [];
+    this._abilityMode = null;
+    this._updateAllPanels();
   },
 
   // ─── AI trigger ─────────────────────────────────────────
@@ -886,9 +1046,30 @@ const UI = {
     const cp   = state.currentPlayer;
     const name = state.players[cp].name;
     const active = state.getActiveUnit();
+
+    // Objective status string
+    let objStatus = '';
+    if (state.gameMode === 'ctf' && state.objectives?.flag) {
+      const f = state.objectives.flag;
+      if (f.carriedBy) {
+        const carrier = state.getUnit(f.carriedBy);
+        objStatus = ` · 🚩 ${carrier?.name || '?'} carrying the flag!`;
+      } else {
+        objStatus = ' · 🚩 Flag at centre — grab it!';
+      }
+    } else if (state.gameMode === 'bomb' && state.objectives) {
+      if (state.objectives.bombPlanted) {
+        objStatus = ` · 💣 BOMB PLANTED — detonates in ${state.objectives.bombTimer} rounds!`;
+      } else {
+        objStatus = ' · 💣 Attackers must plant the bomb';
+      }
+    } else if (state.gameMode === 'vip') {
+      objStatus = ' · 👑 Alpha: protect VIP. Bravo: eliminate them.';
+    }
+
     banner.innerHTML = active
-      ? `Round ${state.turn} — <span style="color:${TEAM_COLORS[cp]}">${name}</span> — Activating: <strong>${active.name}</strong> (${state.actionsLeft} action${state.actionsLeft !== 1 ? 's' : ''} left)`
-      : `Round ${state.turn} — <span style="color:${TEAM_COLORS[cp]}">${name}</span> — Click a unit to activate`;
+      ? `Round ${state.turn} — <span style="color:${TEAM_COLORS[cp]}">${name}</span> — ${active.name} (${state.actionsLeft} action${state.actionsLeft !== 1 ? 's' : ''} left)${objStatus}`
+      : `Round ${state.turn} — <span style="color:${TEAM_COLORS[cp]}">${name}</span> — Click a unit to activate${objStatus}`;
     banner.className = `turn-banner team-${cp}`;
   },
 
@@ -933,6 +1114,30 @@ const UI = {
       const abilityLabels = { overwatch:'Overwatch', heal:'Heal', blast:'Grenade', stealth:'Stealth', command:'Command', sniper:'Overwatch' };
       addBtn('btnAbility', abilityLabels[unit.ability] || 'Ability', '⚡', al >= 1 && !state.abilityUsed?.has(unit.id), 'Use specialist ability');
     }
+
+    // ── Objective action buttons ──
+    if (state.gameMode === 'ctf' && state.objectives?.flag) {
+      const f = state.objectives.flag;
+      // Pick up flag
+      if (f.carriedBy === null && f.capturedBy === null && unit.x === f.x && unit.y === f.y) {
+        addBtn('btnPickupFlag', 'Pick Up Flag', '🚩', al >= 1, 'Pick up the flag and carry it to your base');
+      }
+    }
+    if (state.gameMode === 'bomb' && state.objectives?.sites) {
+      // Plant bomb (attackers = team 0, on a site tile)
+      if (unit.team === 0 && !state.objectives.bombPlanted) {
+        const onSite = state.objectives.sites.some(s => s.x === unit.x && s.y === unit.y && !s.planted);
+        if (onSite) addBtn('btnPlantBomb', 'Plant Bomb', '💣', al >= 1, 'Plant the bomb at this site');
+      }
+      // Defuse bomb (defenders = team 1, on planted site)
+      if (unit.team === 1 && state.objectives.bombPlanted) {
+        const activeSite = state.objectives.sites.find(s => s.id === state.objectives.activeSite);
+        if (activeSite && unit.x === activeSite.x && unit.y === activeSite.y) {
+          addBtn('btnDefuseBomb', 'Defuse Bomb', '🔧', al >= 2, 'Defuse the bomb — takes 2 actions');
+        }
+      }
+    }
+
     // End activation button
     const endBtn = document.createElement('button');
     endBtn.className = 'action-btn end-btn';
@@ -953,6 +1158,42 @@ const UI = {
     if (!unit) return;
     this._showAttackHighlights(unit);
     this.engine.addLog('Click a highlighted enemy to shoot', 'system');
+  },
+
+  btnPickupFlag() {
+    const state = this.engine;
+    const unit  = state.getActiveUnit();
+    if (!unit || state.actionsLeft < 1) return;
+    if (state.tryPickupFlag(unit)) {
+      state.useAction(1);
+      this._updateAllPanels();
+      this._checkAITurn();
+      if (state.phase === 'gameover') this._showGameOver();
+    }
+  },
+
+  btnPlantBomb() {
+    const state = this.engine;
+    const unit  = state.getActiveUnit();
+    if (!unit || state.actionsLeft < 1) return;
+    if (state.tryPlantBomb(unit)) {
+      state.useAction(1);
+      this._updateAllPanels();
+      this._checkAITurn();
+    }
+  },
+
+  btnDefuseBomb() {
+    const state = this.engine;
+    const unit  = state.getActiveUnit();
+    if (!unit || state.actionsLeft < 2) return;
+    if (state.tryDefuseBomb(unit)) {
+      state.useAction(2);
+      this._updateAllPanels();
+      if (state.phase === 'gameover') this._showGameOver();
+    } else {
+      this.showNotif('Move to the bomb site first!', 'warn');
+    }
   },
 
   _updateTeamPanels() {

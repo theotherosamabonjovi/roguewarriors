@@ -139,12 +139,23 @@
      SCREEN: BATTLEFIELD SETUP
 ──────────────────────────────────────────────────────────────── -->
 <div id="screen-battlefield" class="screen" style="justify-content:center; align-items:center; padding:20px;">
-  <div style="display:flex; flex-direction:column; gap:20px; width:min(800px,96%);">
+  <div style="display:flex; flex-direction:column; gap:16px; width:min(860px,96%); max-height:100vh; overflow:auto; padding:8px 0;">
     <h2>🗺️ Battlefield Setup</h2>
 
     <div class="battlefield-container">
       <!-- Controls -->
       <div class="bf-controls">
+
+        <div class="control-group">
+          <div class="control-label">Game Mode</div>
+          <div class="btn-group" style="flex-wrap:wrap;">
+            <button class="gamemode-btn active" data-gamemode="elimination" onclick="UI.setGameMode('elimination')" title="Eliminate all enemies">💀 Elimination</button>
+            <button class="gamemode-btn" data-gamemode="ctf"       onclick="UI.setGameMode('ctf')"       title="Capture the flag">🚩 Capture the Flag</button>
+            <button class="gamemode-btn" data-gamemode="bomb"      onclick="UI.setGameMode('bomb')"      title="Plant / defuse the bomb">💣 Plant the Bomb</button>
+            <button class="gamemode-btn" data-gamemode="vip"       onclick="UI.setGameMode('vip')"       title="Escort or eliminate the VIP">👑 VIP Escort</button>
+          </div>
+        </div>
+
         <div class="control-group">
           <div class="control-label">Terrain Theme</div>
           <div class="btn-group">
@@ -154,6 +165,7 @@
             <button class="theme-btn" data-theme="forest"  onclick="UI.setTheme('forest')">🌲 Forest</button>
           </div>
         </div>
+
         <div class="control-group">
           <div class="control-label">Building Density</div>
           <div class="btn-group">
@@ -162,11 +174,16 @@
             <button class="density-btn" data-density="heavy"  onclick="UI.setDensity('heavy')">Heavy</button>
           </div>
         </div>
+
         <div class="control-group">
-          <div class="control-label">Randomise</div>
-          <button class="reroll-btn" onclick="UI.rerollBattlefield()">🎲 Generate New Map</button>
+          <div class="control-label">Map</div>
+          <div class="btn-group">
+            <button class="reroll-btn" onclick="UI.rerollBattlefield()">🎲 New Random Map</button>
+            <button class="reroll-btn" onclick="UI.openMapEditor()" title="Draw on the map to customise it">✏️ Edit Map</button>
+          </div>
         </div>
-        <div style="display:flex; gap:10px; margin-top:8px; flex-wrap:wrap;">
+
+        <div style="display:flex; gap:10px; margin-top:4px; flex-wrap:wrap;">
           <button class="btn btn-ghost" onclick="UI.showScreen('screen-army')">← Back</button>
           <button class="btn btn-green" onclick="UI.startGame()">⚔️ Deploy &amp; Fight!</button>
         </div>
@@ -177,10 +194,34 @@
         <div class="panel-title">MAP PREVIEW</div>
         <canvas id="preview-canvas" style="border:2px solid var(--border); border-radius:6px;"></canvas>
         <p style="font-size:11px; color:var(--text2); margin-top:6px;">
-          🔵 Alpha deploys left &nbsp; 🔴 Bravo deploys right
+          🔵 Alpha deploys left &nbsp;|&nbsp; 🔴 Bravo deploys right
         </p>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────
+     MAP EDITOR OVERLAY
+──────────────────────────────────────────────────────────────── -->
+<div id="map-editor-overlay" style="display:none; position:fixed; inset:0; z-index:400; background:rgba(0,0,0,0.85); backdrop-filter:blur(4px); align-items:center; justify-content:center; flex-direction:column; gap:12px;">
+  <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap; justify-content:center;">
+    <strong style="font-size:16px; letter-spacing:2px;">✏️ MAP EDITOR</strong>
+
+    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+      <button class="editor-brush-btn active" data-brush="open"     onclick="UI.setEditorBrush('open')"     title="Erase to open ground">🟫 Open</button>
+      <button class="editor-brush-btn"        data-brush="building" onclick="UI.setEditorBrush('building')" title="Paint solid building">🏢 Building</button>
+      <button class="editor-brush-btn"        data-brush="cover"    onclick="UI.setEditorBrush('cover')"    title="Paint low cover">🧱 Cover</button>
+      <button class="editor-brush-btn"        data-brush="rubble"   onclick="UI.setEditorBrush('rubble')"   title="Paint rubble">🪨 Rubble</button>
+    </div>
+
+    <button class="btn btn-ghost" style="font-size:12px;" onclick="UI.closeMapEditor()">✅ Done Editing</button>
+  </div>
+
+  <p style="font-size:11px; color:var(--text2);">Click or drag to paint. Deploy zones (left/right edges) are locked.</p>
+
+  <div style="overflow:auto; max-width:96vw; max-height:78vh; border:2px solid var(--border); border-radius:8px;">
+    <canvas id="editor-canvas" style="display:block; cursor:crosshair;"></canvas>
   </div>
 </div>
 
@@ -359,6 +400,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Set defaults
   UI.setTheme('urban');
   UI.setDensity('medium');
+  UI.setGameMode('elimination');
 
   // Mouse-follow tooltip
   document.addEventListener('mousemove', (e) => {

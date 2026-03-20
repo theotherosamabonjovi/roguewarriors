@@ -8,30 +8,32 @@ class Engine {
   }
 
   reset() {
-    this.board      = [];   // [row][col] = { type, building, cover, terrain }
-    this.buildings  = [];   // [{x,y,w,h,type}]
-    this.coverObjs  = [];   // [{x,y,type}]
-    this.units      = [];   // Unit objects
+    this.board      = [];
+    this.buildings  = [];
+    this.coverObjs  = [];
+    this.units      = [];
     this.players    = [
       { name: TEAM_NAMES[0], team: 0, squadDef: [] },
       { name: TEAM_NAMES[1], team: 1, squadDef: [] },
     ];
     this.theme      = 'urban';
-    this.phase      = 'setup';       // setup | deploy | playing | gameover
+    this.phase      = 'setup';
     this.turn       = 1;
     this.currentPlayer = 0;
-    this.activeUnit    = null;       // currently activated unit id
+    this.activeUnit    = null;
     this.actionsLeft   = MAX_ACTIONS;
     this.hasMoved      = false;
     this.hasSprinted   = false;
     this.isAiming      = false;
-    this.activatedThisRound = new Set(); // unit ids activated this round
+    this.activatedThisRound = new Set();
     this.log           = [];
     this.winner        = null;
-    this.mode          = 'ai';       // ai | local | online
-    this.abilityUsed   = new Set();  // unit ids that used ability this game
-    this.revivedUnits  = new Set();  // medic heal tracking
-    this.overwatchUnits = new Set(); // sniper overwatch
+    this.mode          = 'ai';
+    this.gameMode      = 'elimination'; // elimination | ctf | bomb | vip
+    this.objectives    = {};  // mode-specific state
+    this.abilityUsed   = new Set();
+    this.revivedUnits  = new Set();
+    this.overwatchUnits = new Set();
     this._uidCounter   = 0;
   }
 
@@ -262,6 +264,9 @@ class Engine {
     this.currentPlayer   = 0;
     this.activatedThisRound = new Set();
     this.activeUnit      = null;
+    // Initialise game-mode objectives
+    this.initObjectives();
+    if (this.gameMode === 'vip') this.designateVIP();
     this.addLog(`═══ Round 1 begins — ${this.players[0].name} activates first ═══`, 'system');
   }
 
@@ -305,10 +310,14 @@ class Engine {
     const tile = this.board[y][x];
     unit.x = x;
     unit.y = y;
-    // Check if now in cover
     unit.inCover = (tile.type === TILE.COVER || tile.type === TILE.RUBBLE);
     unit.suppressed = false;
     this.addLog(`${unit.name} (${this.players[unit.team].name}) moves to (${x},${y})`, 'move');
+    // Move flag with carrier
+    if (this.gameMode === 'ctf') {
+      this.updateFlagPosition(unit);
+      this.tryScoreFlag(unit);
+    }
   }
 
   // ─── Line of Sight ────────────────────────────────────────
@@ -422,6 +431,9 @@ class Engine {
         target.alive = false;
         target.hp = 0;
         this.addLog(`💀 ${target.name} is eliminated!`, 'death');
+        // Drop flag if carrier was killed
+        if (this.gameMode === 'ctf') this.dropFlag(target.id);
+        this.checkObjectiveWin();
       } else {
         target.suppressed = true;
         this.addLog(`${target.name} is hit and suppressed!`, 'hit');
@@ -580,12 +592,212 @@ class Engine {
     this.addLog(`═══ Round ${this.turn} begins ═══`, 'system');
   }
 
+  // ─── Deselect/deactivate without consuming the activation ─
+  deactivateUnit() {
+    this.activeUnit  = null;
+    this.actionsLeft = MAX_ACTIONS;
+    this.hasMoved    = false;
+    this.hasSprinted = false;
+    this.isAiming    = false;
+  }
+
+  // ─── Objective initialisation ──────────────────────────────
+  initObjectives() {
+    const { COLS, ROWS } = CFG;
+    const cx = Math.floor(COLS / 2);
+    const cy = Math.floor(ROWS / 2);
+
+    if (this.gameMode === 'ctf') {
+      // Place flag at centre (find nearest open tile)
+      const flagPos = this._nearestOpen(cx, cy);
+      this.objectives = {
+        flag: { x: flagPos.x, y: flagPos.y, carriedBy: null, capturedBy: null },
+      };
+      this.addLog('🚩 Capture the Flag — grab the flag at centre and return it to your base!', 'system');
+
+    } else if (this.gameMode === 'bomb') {
+      // Two bomb sites, roughly 1/3 and 2/3 across
+      const site1 = this._nearestOpen(Math.floor(COLS * 0.35), Math.floor(ROWS * 0.3));
+      const site2 = this._nearestOpen(Math.floor(COLS * 0.65), Math.floor(ROWS * 0.7));
+      this.objectives = {
+        sites: [
+          { id: 0, x: site1.x, y: site1.y, planted: false, defused: false, plantedBy: null, timer: 0 },
+          { id: 1, x: site2.x, y: site2.y, planted: false, defused: false, plantedBy: null, timer: 0 },
+        ],
+        bombPlanted: false,
+        bombTimer: 0,
+        maxTimer: 8,  // rounds until explosion
+        activeSite: null,
+      };
+      this.addLog('💣 Plant the Bomb — Attackers plant at a site. Defenders have 8 rounds to defuse!', 'system');
+
+    } else if (this.gameMode === 'vip') {
+      // VIP is designated during _beginBattle once units exist
+      this.objectives = { vipId: null, extractX: CFG.COLS - 2, extractY: Math.floor(ROWS / 2) };
+      this.addLog('👑 VIP Escort — Alpha must get the VIP to the extraction point. Bravo must eliminate them!', 'system');
+    }
+  }
+
+  _nearestOpen(cx, cy) {
+    for (let r = 0; r <= Math.max(CFG.COLS, CFG.ROWS); r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+          const x = cx + dx, y = cy + dy;
+          if (this._inBounds(x, y) && this.board[y][x].type !== TILE.BUILDING) {
+            return { x, y };
+          }
+        }
+      }
+    }
+    return { x: cx, y: cy };
+  }
+
+  // ─── Objective actions ─────────────────────────────────────
+
+  // CTF: unit picks up or captures flag
+  tryPickupFlag(unit) {
+    const obj = this.objectives;
+    if (!obj.flag) return false;
+    const f = obj.flag;
+    if (f.capturedBy !== null) return false;
+    if (f.carriedBy !== null) return false; // already carried
+    if (unit.x !== f.x || unit.y !== f.y) return false;
+    f.carriedBy = unit.id;
+    this.addLog(`🚩 ${unit.name} picks up the flag!`, 'ability');
+    return true;
+  }
+
+  tryScoreFlag(unit) {
+    const obj = this.objectives;
+    if (!obj.flag || obj.flag.carriedBy !== unit.id) return false;
+    const inBase = unit.team === 0 ? unit.x <= 3 : unit.x >= CFG.COLS - 4;
+    if (!inBase) return false;
+    obj.flag.capturedBy = unit.team;
+    obj.flag.carriedBy  = null;
+    this.addLog(`🚩 ${this.players[unit.team].name} captures the flag! GAME OVER!`, 'system');
+    this.phase  = 'gameover';
+    this.winner = unit.team;
+    return true;
+  }
+
+  // Drop flag when carrier is killed
+  dropFlag(unitId) {
+    const obj = this.objectives;
+    if (!obj.flag || obj.flag.carriedBy !== unitId) return;
+    const carrier = this.getUnit(unitId);
+    if (carrier) { obj.flag.x = carrier.x; obj.flag.y = carrier.y; }
+    obj.flag.carriedBy = null;
+    this.addLog(`🚩 The flag was dropped!`, 'system');
+  }
+
+  // Move flag with carrier each time carrier moves
+  updateFlagPosition(unit) {
+    const obj = this.objectives;
+    if (!obj.flag || obj.flag.carriedBy !== unit.id) return;
+    obj.flag.x = unit.x;
+    obj.flag.y = unit.y;
+  }
+
+  // Bomb: plant
+  tryPlantBomb(unit) {
+    const obj = this.objectives;
+    if (!obj.sites || unit.team !== 0) return false; // only attackers plant
+    if (obj.bombPlanted) return false;
+    const site = obj.sites.find(s => s.x === unit.x && s.y === unit.y && !s.planted);
+    if (!site) return false;
+    site.planted   = true;
+    site.plantedBy = unit.id;
+    obj.bombPlanted = true;
+    obj.activeSite  = site.id;
+    obj.bombTimer   = obj.maxTimer;
+    this.addLog(`💣 ${unit.name} plants the bomb at Site ${site.id + 1}! Defenders have ${obj.maxTimer} rounds!`, 'ability');
+    return true;
+  }
+
+  // Bomb: defuse
+  tryDefuseBomb(unit) {
+    const obj = this.objectives;
+    if (!obj.sites || unit.team !== 1) return false; // only defenders defuse
+    if (!obj.bombPlanted) return false;
+    const site = obj.sites.find(s => s.id === obj.activeSite);
+    if (!site || site.defused) return false;
+    if (unit.x !== site.x || unit.y !== site.y) return false;
+    site.defused    = true;
+    obj.bombPlanted = false;
+    this.addLog(`💣 ${unit.name} defuses the bomb! Defenders win!`, 'system');
+    this.phase  = 'gameover';
+    this.winner = 1;
+    return true;
+  }
+
+  // Called at end of each round to tick bomb timer
+  tickBombTimer() {
+    const obj = this.objectives;
+    if (!obj.sites || !obj.bombPlanted) return;
+    obj.bombTimer--;
+    this.addLog(`💣 Bomb detonates in ${obj.bombTimer} round${obj.bombTimer !== 1 ? 's' : ''}!`, 'system');
+    if (obj.bombTimer <= 0) {
+      this.addLog(`💥 BOOM! The bomb explodes! Attackers win!`, 'system');
+      this.phase  = 'gameover';
+      this.winner = 0;
+    }
+  }
+
+  // VIP: designate after deploy
+  designateVIP() {
+    const team0 = this.units.filter(u => u.team === 0 && u.alive);
+    // Prefer leader, otherwise first unit
+    const vip = team0.find(u => u.ability === 'command') || team0[0];
+    if (!vip) return;
+    vip.isVIP = true;
+    vip.hp    = 2;
+    vip.maxHp = 2;
+    this.objectives.vipId = vip.id;
+    this.addLog(`👑 ${vip.name} is the VIP — protect them!`, 'system');
+  }
+
+  checkObjectiveWin() {
+    if (this.phase === 'gameover') return;
+    // checkWin() is the authority — just call it and apply result
+    const winner = this.checkWin();
+    if (winner !== null) {
+      this.phase  = 'gameover';
+      this.winner = winner;
+      const modeLabels = {
+        vip: winner === 1 ? '👑 The VIP has been eliminated! Bravo wins!' : '👑 All enemies eliminated — Alpha wins!',
+      };
+      const msg = modeLabels[this.gameMode] || `🏆 ${this.players[winner].name} wins!`;
+      this.addLog(msg, 'system');
+    }
+  }
+
   checkWin() {
+    // Universal rule: wipe out the enemy squad = instant win in ALL modes
     const p0alive = this.units.some(u => u.alive && u.team === 0);
     const p1alive = this.units.some(u => u.alive && u.team === 1);
     if (!p0alive) return 1;
     if (!p1alive) return 0;
+
+    // VIP mode: Bravo also wins if they kill the VIP (even while others live)
+    if (this.gameMode === 'vip' && this.objectives?.vipId) {
+      const vip = this.getUnit(this.objectives.vipId);
+      if (vip && !vip.alive) return 1;
+    }
+
     return null;
+  }
+
+  newRound() {
+    this.turn++;
+    this.activatedThisRound = new Set();
+    this.overwatchUnits     = new Set();
+    this.units.forEach(u => {
+      if (u.alive) { u.suppressed = false; u.aiming = false; }
+    });
+    this.currentPlayer = 0;
+    this.addLog(`═══ Round ${this.turn} begins ═══`, 'system');
+    if (this.gameMode === 'bomb') this.tickBombTimer();
   }
 
   // ─── Utilities ────────────────────────────────────────────

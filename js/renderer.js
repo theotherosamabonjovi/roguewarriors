@@ -73,6 +73,11 @@ class Renderer {
       if (!u.alive && u.x >= 0 && u.y >= 0) this._drawTombstone(state, u);
     });
 
+    // Draw objectives (CTF flag, bomb sites, VIP marker, extraction point)
+    if (state.phase === 'playing' || state.phase === 'gameover') {
+      this._drawObjectives(state);
+    }
+
     // Draw hover
     if (this.hoverTile) this._drawHover();
 
@@ -632,6 +637,123 @@ class Renderer {
     }
     ctx.restore();
   }
+
+  // ─── Objectives ───────────────────────────────────────────
+  _drawObjectives(state) {
+    const ctx = this.ctx;
+    const T   = this.T;
+    const obj = state.objectives;
+    if (!obj) return;
+
+    // ── CTF flag ──
+    if (state.gameMode === 'ctf' && obj.flag && obj.flag.capturedBy === null) {
+      const f  = obj.flag;
+      const cx = f.x * T + T / 2;
+      const cy = f.y * T + T / 2;
+      const pulse = Math.sin(this.animFrame * 0.08) * 0.4 + 0.6;
+      ctx.save();
+      // Glow ring
+      ctx.strokeStyle = `rgba(255,220,0,${pulse})`;
+      ctx.lineWidth   = 2;
+      ctx.beginPath(); ctx.arc(cx, cy, T * 0.45, 0, Math.PI * 2); ctx.stroke();
+      // Pole
+      ctx.strokeStyle = '#ccc'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cx - 4, cy + 10); ctx.lineTo(cx - 4, cy - 14); ctx.stroke();
+      // Flag cloth
+      const carrier = f.carriedBy ? state.getUnit(f.carriedBy) : null;
+      const flagColor = carrier ? TEAM_COLORS[carrier.team] : '#ffdd00';
+      ctx.fillStyle = flagColor;
+      ctx.beginPath();
+      ctx.moveTo(cx - 4, cy - 14);
+      ctx.lineTo(cx + 12, cy - 8);
+      ctx.lineTo(cx - 4, cy - 2);
+      ctx.closePath(); ctx.fill();
+      // Label
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+      ctx.shadowColor = '#000'; ctx.shadowBlur = 3;
+      ctx.fillText(carrier ? '🚩 CARRIED' : '🚩 FLAG', cx, cy + 22);
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    }
+
+    // ── Bomb sites ──
+    if (state.gameMode === 'bomb' && obj.sites) {
+      obj.sites.forEach((site, i) => {
+        if (site.defused) return;
+        const cx = site.x * T + T / 2;
+        const cy = site.y * T + T / 2;
+        const pulse = Math.sin(this.animFrame * 0.12 + i) * 0.5 + 0.5;
+        ctx.save();
+        if (site.planted) {
+          // Planted: red pulsing ring
+          ctx.fillStyle   = `rgba(255,50,50,${0.2 + pulse * 0.3})`;
+          ctx.strokeStyle = `rgba(255,50,50,${0.6 + pulse * 0.4})`;
+          ctx.lineWidth   = 3;
+          ctx.beginPath(); ctx.arc(cx, cy, T * 0.44, 0, Math.PI * 2);
+          ctx.fill(); ctx.stroke();
+          // Bomb icon
+          ctx.font = `${Math.round(T * 0.4)}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillStyle = '#fff'; ctx.fillText('💣', cx, cy);
+          // Timer
+          ctx.font = 'bold 8px monospace'; ctx.textBaseline = 'alphabetic';
+          ctx.fillStyle = '#ff4444';
+          ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
+          ctx.fillText(`BOOM IN ${obj.bombTimer}`, cx, cy + 22);
+          ctx.shadowBlur = 0;
+        } else {
+          // Unplanted: yellow site marker
+          ctx.fillStyle   = 'rgba(255,220,0,0.15)';
+          ctx.strokeStyle = `rgba(255,220,0,${0.5 + pulse * 0.3})`;
+          ctx.lineWidth   = 2;
+          ctx.fillRect(site.x * T + 3, site.y * T + 3, T - 6, T - 6);
+          ctx.strokeRect(site.x * T + 3, site.y * T + 3, T - 6, T - 6);
+          ctx.fillStyle = '#ffdd00'; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
+          ctx.shadowColor = '#000'; ctx.shadowBlur = 3;
+          ctx.fillText(`SITE ${String.fromCharCode(65 + i)}`, cx, cy + 4);
+          ctx.shadowBlur = 0;
+        }
+        ctx.restore();
+      });
+    }
+
+    // ── VIP crown overlay & extraction point ──
+    if (state.gameMode === 'vip') {
+      // Extraction point
+      const ex = obj.extractX, ey = obj.extractY;
+      if (this._inBoundsR(ex, ey)) {
+        const pulse = Math.sin(this.animFrame * 0.1) * 0.4 + 0.6;
+        ctx.save();
+        ctx.fillStyle   = `rgba(58,158,255,${0.15 + pulse * 0.1})`;
+        ctx.strokeStyle = `rgba(58,158,255,${pulse})`;
+        ctx.lineWidth   = 2;
+        ctx.setLineDash([4, 4]);
+        ctx.fillRect(ex * T + 2, ey * T + 2, T - 4, T - 4);
+        ctx.strokeRect(ex * T + 2, ey * T + 2, T - 4, T - 4);
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#3a9eff'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+        ctx.shadowColor = '#000'; ctx.shadowBlur = 3;
+        ctx.fillText('EXTRACT', ex * T + T / 2, ey * T + T / 2 + 4);
+        ctx.shadowBlur = 0;
+        ctx.restore();
+      }
+      // Crown on VIP unit
+      if (obj.vipId) {
+        const vip = state.getUnit(obj.vipId);
+        if (vip && vip.alive && vip.x >= 0) {
+          const cx = vip.x * T + T / 2;
+          const cy = vip.y * T;
+          ctx.save();
+          ctx.font = '13px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+          ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
+          ctx.fillText('👑', cx, cy + 2);
+          ctx.shadowBlur = 0;
+          ctx.restore();
+        }
+      }
+    }
+  }
+
+  _inBoundsR(x, y) { return x >= 0 && y >= 0 && x < CFG.COLS && y < CFG.ROWS; }
 
   // ─── Coordinate helpers ───────────────────────────────────
   screenToGrid(sx, sy) {

@@ -543,6 +543,24 @@ html, body {
 .gm-buttons { display: flex; flex-direction: column; gap: 10px; width: 100%; }
 .gm-btn    { width: 100%; padding: 12px 20px; font-size: 14px; text-align: center; }
 
+/* ─── Game mode buttons ──────────────────────────────────────── */
+.gamemode-btn {
+  padding: 7px 12px; background: var(--bg3); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text2); cursor: pointer; font-size: 12px;
+  transition: all 0.15s; white-space: nowrap;
+}
+.gamemode-btn:hover  { border-color: var(--gold); color: var(--text); }
+.gamemode-btn.active { background: rgba(255,190,11,0.15); border-color: var(--gold); color: var(--gold); font-weight: 600; }
+
+/* ─── Map editor brush buttons ───────────────────────────────── */
+.editor-brush-btn {
+  padding: 7px 14px; background: var(--bg3); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text2); cursor: pointer; font-size: 13px;
+  transition: all 0.15s;
+}
+.editor-brush-btn:hover  { border-color: var(--accent); color: var(--text); }
+.editor-brush-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
 /* ─── Misc ───────────────────────────────────────────────────── */
 
 /* ─── Deployment phase ───────────────────────────────────────── */
