@@ -961,43 +961,84 @@ const UI = {
   },
 
   _handleRemoteAction(action) {
-    const state = this.engine;
-    const unit  = state.getUnit(action.unitId);
-    if (!unit) return;
+    const state   = this.engine;
+    const remTeam = this.mp.isHost ? 1 : 0;  // remote player's team
+
+    // ── FIX #7: Gate every action behind the same legality checks used locally ──
+
+    // 1. Must be remote team's turn
+    if (state.currentPlayer !== remTeam) return;
+
+    // 2. 'end' doesn't need a unit
+    if (action.type === 'end') {
+      state.endActivation();
+      this.renderer.selectedUnit    = null;
+      this.renderer.moveHighlights  = [];
+      this._updateAllPanels();
+      if (state.phase === 'gameover') this._showGameOver();
+      return;
+    }
+
+    // 3. Unit must exist, be alive, and belong to the remote team
+    const unit = state.getUnit(action.unitId);
+    if (!unit || !unit.alive || unit.team !== remTeam) return;
+
+    // 4. Unit must not have already been activated this round (unless already active)
+    const currentActive = state.getActiveUnit();
+    if (currentActive && currentActive.id !== unit.id) return; // someone else is active
+    if (!currentActive && state.activatedThisRound.has(unit.id)) return;
+
+    // 5. Activate if needed (safe now that ownership is verified)
+    if (!currentActive) state.activateUnit(unit);
 
     switch (action.type) {
-      case 'move':
-        if (!state.getActiveUnit()) state.activateUnit(unit);
+      case 'move': {
+        // Validate destination is in legal movement range
+        const isSprint = !!action.sprint;
+        const legalTiles = state.getMovementRange(unit, isSprint);
+        const isLegal = legalTiles.some(t => t.x === action.x && t.y === action.y);
+        if (!isLegal) return;
         state.moveUnit(unit, action.x, action.y);
-        action.sprint ? (state.hasSprinted = true, state.useAction(2)) : state.useAction(1);
-        break;
-      case 'shoot': {
-        if (!state.getActiveUnit()) state.activateUnit(unit);
-        const t = state.getUnit(action.targetId);
-        if (t) { const r = state.resolveShoot(unit, t); this._showDiceResult(r); state.useAction(1); }
+        isSprint ? (state.hasSprinted = true, state.useAction(2)) : state.useAction(1);
         break;
       }
-      case 'blast':
-        if (!state.getActiveUnit()) state.activateUnit(unit);
+      case 'shoot': {
+        // Target must be a valid target for this unit
+        const validTargets = state.getValidTargets(unit);
+        const t = validTargets.find(v => v.id === action.targetId);
+        if (!t) return;
+        const r = state.resolveShoot(unit, t);
+        this._showDiceResult(r);
+        state.useAction(1);
+        break;
+      }
+      case 'blast': {
+        // Blast centre must be in bounds and within range
+        if (!state._inBounds(action.x, action.y)) return;
+        const dist = Math.max(Math.abs(unit.x - action.x), Math.abs(unit.y - action.y));
+        if (dist > unit.range) return;
         state.resolveBlast(unit, action.x, action.y);
         state.useAction(2);
         break;
+      }
       case 'heal': {
-        if (!state.getActiveUnit()) state.activateUnit(unit);
+        // Heal target must be an adjacent ally
         const ht = state.getUnit(action.targetId);
-        if (ht) { state.tryHeal(unit, ht); state.useAction(1); }
+        if (!ht || ht.team !== remTeam) return;
+        const hDist = Math.max(Math.abs(unit.x - ht.x), Math.abs(unit.y - ht.y));
+        if (hDist > 1) return;
+        state.tryHeal(unit, ht);
+        state.useAction(1);
         break;
       }
       case 'overwatch':
-        if (!state.getActiveUnit()) state.activateUnit(unit);
-        state.setOverwatch(unit); state.useAction(2);
+        state.setOverwatch(unit);
+        state.useAction(2);
         break;
-      case 'end':
-        state.endActivation();
-        this.renderer.selectedUnit = null;
-        this.renderer.moveHighlights = [];
-        break;
+      default:
+        return; // unknown action type — ignore
     }
+
     this._updateAllPanels();
     if (state.phase === 'gameover') this._showGameOver();
   },
@@ -1235,7 +1276,19 @@ const UI = {
     const logEl = document.getElementById('combat-log');
     if (!logEl || !state) return;
     const last = state.log.slice(-18);
-    logEl.innerHTML = last.map(e => `<div class="log-${e.type}">${e.text}</div>`).join('');
+    // FIX #9: Build log entries with safe DOM APIs instead of innerHTML to
+    // prevent XSS. e.type is whitelisted; e.text is set as textContent.
+    const ALLOWED_TYPES = new Set([
+      'info','system','move','shoot','hit','miss','death','ability','activate','melee','error'
+    ]);
+    logEl.innerHTML = '';
+    for (const e of last) {
+      const div = document.createElement('div');
+      const safeType = ALLOWED_TYPES.has(e.type) ? e.type : 'info';
+      div.className   = 'log-' + safeType;
+      div.textContent = e.text;
+      logEl.appendChild(div);
+    }
     logEl.scrollTop = logEl.scrollHeight;
   },
 

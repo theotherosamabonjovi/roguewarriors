@@ -111,8 +111,14 @@ class AIPlayer {
       }
     }
 
-    // If actions left and in cover: take cover
-    if (actionsLeft >= 1 && this._isInCover(state, simX, simY)) {
+    // If actions left and in cover: take cover (but reserve 1 action for medic heal)
+    // FIX #4: Previously the cover action could consume the last action before
+    // the medic check ran, leaving actionsLeft at 0 and silently dropping the
+    // heal. Now we only take cover if we won't need that action for healing.
+    const medicNeedsAction = unit.ability === 'heal'
+      && !state.revivedUnits.has(unit.id)
+      && this._findHealTarget(state, unit) !== null;
+    if (actionsLeft >= 1 && this._isInCover(state, simX, simY) && !(actionsLeft === 1 && medicNeedsAction)) {
       actions.push({ type: 'cover', unitId: unit.id });
       actionsLeft--;
     }
@@ -143,16 +149,22 @@ class AIPlayer {
   }
 
   _findBestBlastTile(state, unit, targets) {
-    // Find a tile that maximises enemies hit
+    // Find a tile that maximises enemies hit without hitting friendly units.
+    // FIX #5: Original code counted only enemies, ignoring allies in the same
+    // 3×3 blast radius. Now we skip any tile that would catch a friendly.
     let bestTile = null, bestCount = 1;
     for (const t of targets) {
       let count = 0;
+      let hitsFriendly = false;
       for (let dy = -1; dy <= 1; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
-          if (state.getUnitAt(t.x + dx, t.y + dy)?.team !== unit.team) count++;
+          const occupant = state.getUnitAt(t.x + dx, t.y + dy);
+          if (!occupant) continue;
+          if (occupant.team !== unit.team) count++;
+          else hitsFriendly = true;
         }
       }
-      if (count > bestCount) { bestCount = count; bestTile = { x: t.x, y: t.y }; }
+      if (!hitsFriendly && count > bestCount) { bestCount = count; bestTile = { x: t.x, y: t.y }; }
     }
     return bestTile;
   }

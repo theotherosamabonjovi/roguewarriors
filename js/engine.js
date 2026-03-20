@@ -407,9 +407,11 @@ class Engine {
       const saveTarget = target.defense - coverBonus;
       if (save < saveTarget) {
         wounds++;
-        // Stealth rule: if scout in cover, enemy needs 6 to hit
+        // FIX #2: Stealth rule — Scout in cover can only be wounded on an attack
+        // roll of exactly 6 (double-6 to hit). We check finalRolls[h] (the
+        // attack die that produced this hit), not the defense save roll.
         if (target.ability === 'stealth' && target.inCover) {
-          if (save < 6) { wounds--; } // cancel wound unless 6
+          if (finalRolls[h] < 6) { wounds--; } // cancel unless attack roll was a 6
         }
       } else {
         // Saved: unit may be suppressed
@@ -451,19 +453,26 @@ class Engine {
   }
 
   resolveBlast(attacker, cx, cy) {
-    // Grenadier blast: hits target + adjacent tiles
+    // Grenadier blast: hits every unit in the 3×3 area — friend or foe.
+    // The AI avoids targeting tiles that would catch allies, but a human
+    // player can throw carelessly and catch their own squad.
     const affected = [];
+    const friendlyHit = [];
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
         const tx = cx + dx, ty = cy + dy;
         const target = this.getUnitAt(tx, ty);
-        if (target && target.alive && target.team !== attacker.team) {
+        if (target && target.alive && target.id !== attacker.id) {
           affected.push(target);
+          if (target.team === attacker.team) friendlyHit.push(target);
         }
       }
     }
     const results = affected.map(t => this.resolveShoot(attacker, t, 1));
-    this.addLog(`💥 ${attacker.name} throws grenade at (${cx},${cy}) — ${affected.length} caught in blast!`, 'ability');
+    const friendlyStr = friendlyHit.length
+      ? ` ⚠️ Friendly fire — ${friendlyHit.map(u => u.name).join(', ')} caught in blast!`
+      : '';
+    this.addLog(`💥 ${attacker.name} throws grenade at (${cx},${cy}) — ${affected.length} caught in blast!${friendlyStr}`, 'ability');
     return results;
   }
 
@@ -577,23 +586,11 @@ class Engine {
     this.addLog(`${this.players[this.currentPlayer].name}'s turn`, 'system');
   }
 
-  newRound() {
-    this.turn++;
-    this.activatedThisRound = new Set();
-    this.overwatchUnits     = new Set();
-    // Clear per-round states
-    this.units.forEach(u => {
-      if (u.alive) {
-        u.suppressed = false;
-        u.aiming     = false;
-      }
-    });
-    this.currentPlayer = 0;
-    this.addLog(`═══ Round ${this.turn} begins ═══`, 'system');
-  }
-
   // ─── Deselect/deactivate without consuming the activation ─
+  // FIX #3: Mark the unit as activated so it cannot be re-selected this round,
+  // preventing a player from deactivating and re-activating to gain free actions.
   deactivateUnit() {
+    if (this.activeUnit) this.activatedThisRound.add(this.activeUnit);
     this.activeUnit  = null;
     this.actionsLeft = MAX_ACTIONS;
     this.hasMoved    = false;
@@ -831,11 +828,25 @@ class Engine {
   }
 
   deserialize(str) {
+    // FIX #8: Only restore the explicit fields we serialized. Never use
+    // Object.assign(this, d) — a malicious peer could inject arbitrary keys,
+    // override prototype methods, or immediately declare themselves the winner.
     const d = JSON.parse(str);
-    Object.assign(this, d);
-    this.activatedThisRound = new Set(d.activatedThisRound);
-    this.abilityUsed        = new Set(d.abilityUsed);
-    this.revivedUnits       = new Set(d.revivedUnits);
-    this.overwatchUnits     = new Set(d.overwatchUnits);
+    const ALLOWED_FIELDS = [
+      'board', 'buildings', 'coverObjs', 'units', 'players',
+      'theme', 'phase', 'turn', 'currentPlayer', 'activeUnit',
+      'actionsLeft', 'hasMoved', 'hasSprinted', 'isAiming',
+      'winner', 'log', '_uidCounter', 'gameMode', 'objectives',
+    ];
+    for (const key of ALLOWED_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(d, key)) {
+        this[key] = d[key];
+      }
+    }
+    // Restore Sets from serialized arrays (validated to be arrays)
+    this.activatedThisRound = new Set(Array.isArray(d.activatedThisRound) ? d.activatedThisRound : []);
+    this.abilityUsed        = new Set(Array.isArray(d.abilityUsed)        ? d.abilityUsed        : []);
+    this.revivedUnits       = new Set(Array.isArray(d.revivedUnits)       ? d.revivedUnits       : []);
+    this.overwatchUnits     = new Set(Array.isArray(d.overwatchUnits)     ? d.overwatchUnits     : []);
   }
 }

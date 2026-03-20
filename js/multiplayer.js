@@ -47,7 +47,10 @@ class MultiplayerManager {
 
     this.peer.on('error', (err) => {
       console.error('PeerJS join error:', err);
-      UI.showNotif('Could not connect to room: ' + code, 'error');
+      // FIX #10: Never reflect raw user input directly into UI strings.
+      // Truncate and strip non-alphanumeric chars from the code before display.
+      const safeCode = String(code).replace(/[^a-zA-Z0-9-]/g, '').slice(0, 32);
+      UI.showNotif('Could not connect to room: ' + safeCode, 'error');
     });
   }
 
