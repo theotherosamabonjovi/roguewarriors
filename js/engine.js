@@ -207,16 +207,53 @@ class Engine {
   }
 
   // Auto-place remaining units for a team (used by AI)
+  // Spreads units across the full zone height rather than stacking at top
   autoDeployTeam(team) {
     const unplaced = this.units.filter(u => u.team === team && !u.deployed);
-    const zone     = this.deployZone(team);
-    let zoneIdx    = 0;
-    for (const u of unplaced) {
-      while (zoneIdx < zone.length && this.getUnitAt(zone[zoneIdx].x, zone[zoneIdx].y)) zoneIdx++;
-      if (zoneIdx >= zone.length) break;
-      this.placeUnit(u, zone[zoneIdx].x, zone[zoneIdx].y);
-      zoneIdx++;
+    if (!unplaced.length) return;
+
+    const { COLS, ROWS } = CFG;
+    const colStart = team === 0 ? 0 : COLS - 4;
+    const colEnd   = team === 0 ? 3 : COLS - 1;
+
+    // Build a grid of valid tiles spread evenly across rows
+    const validTiles = [];
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = colStart; c <= colEnd; c++) {
+        if (this.board[r][c].type === TILE.BUILDING) continue;
+        validTiles.push({ x: c, y: r });
+      }
     }
+
+    // Shuffle so placement isn't always top corner
+    for (let i = validTiles.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [validTiles[i], validTiles[j]] = [validTiles[j], validTiles[i]];
+    }
+
+    // Spread across different rows: sort chosen tiles by row after picking
+    // Pick one tile per unit, preferring spread-out rows
+    const rowsUsed = new Set();
+    const picked   = [];
+    // First pass: try to get one unit per row
+    for (const tile of validTiles) {
+      if (picked.length >= unplaced.length) break;
+      if (!rowsUsed.has(tile.y) && !this.getUnitAt(tile.x, tile.y)) {
+        picked.push(tile);
+        rowsUsed.add(tile.y);
+      }
+    }
+    // Second pass: fill remaining from any free tile
+    for (const tile of validTiles) {
+      if (picked.length >= unplaced.length) break;
+      if (!picked.some(p => p.x === tile.x && p.y === tile.y) && !this.getUnitAt(tile.x, tile.y)) {
+        picked.push(tile);
+      }
+    }
+
+    unplaced.forEach((u, i) => {
+      if (i < picked.length) this.placeUnit(u, picked[i].x, picked[i].y);
+    });
   }
 
   _beginBattle() {
