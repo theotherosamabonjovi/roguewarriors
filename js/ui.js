@@ -1598,19 +1598,30 @@ const UI = {
 
   // ─── Multiplayer lobby ───────────────────────────────────
   initMultiplayer() {
+    // Tear down any existing peer cleanly before creating a new one.
+    if (this.mp) { this.mp.destroy(); }
     this.mp = new MultiplayerManager();
   },
 
   hostGame() {
+    // Guard: if we're already hosting and waiting, don't restart — just
+    // make sure the code is visible. A second click would abandon the peer
+    // the joiner is trying to connect to and generate a useless new code.
+    if (this.mp?.isHost && !this.mp?.connected) {
+      document.getElementById('room-code-display').style.display = 'block';
+      return;
+    }
     this.initMultiplayer();
     this.myTeam = 0;
     this.mp.host(
       (code) => {
-        document.getElementById('room-code-display').textContent = code;
+        const display = document.getElementById('room-code-display');
+        display.textContent = code;
+        display.style.display = 'block';
         document.getElementById('lobby-status').textContent = 'Waiting for opponent to join…';
       },
       () => {
-        this._setupMultiplayerCallbacks();   // wire onAction before any messages fly
+        this._setupMultiplayerCallbacks();
         document.getElementById('lobby-status').textContent = '✅ Opponent connected! Starting army builder…';
         setTimeout(() => { this.showScreen('screen-army'); this.initArmyBuilder(0); }, 1000);
       }
@@ -1620,11 +1631,13 @@ const UI = {
   joinGame() {
     const code = document.getElementById('join-code-input').value.trim();
     if (!code) { this.showNotif('Enter a room code!', 'warn'); return; }
+    // Destroy any previous connection attempt before trying a new one.
     this.initMultiplayer();
     this.myTeam = 1;
+    document.getElementById('lobby-status').textContent = 'Connecting…';
     this.mp.join(code,
       () => {
-        this._setupMultiplayerCallbacks();   // wire onAction before any messages fly
+        this._setupMultiplayerCallbacks();
         document.getElementById('lobby-status').textContent = '✅ Connected! Starting army builder…';
         setTimeout(() => { this.showScreen('screen-army'); this.initArmyBuilder(1); }, 1000);
       }

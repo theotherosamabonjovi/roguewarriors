@@ -427,15 +427,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-// Show room code box on host
-const origHost = typeof UI !== 'undefined' ? null : null;
-document.addEventListener('DOMContentLoaded', () => {
-  const _originalHostGame = UI.hostGame.bind(UI);
-  UI.hostGame = function() {
-    document.getElementById('room-code-display').style.display = 'block';
-    _originalHostGame();
-  };
-});
+// room-code-display visibility is now managed inside UI.hostGame() directly.
 </script>
 </body>
 </html>
