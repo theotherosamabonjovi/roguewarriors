@@ -1138,12 +1138,17 @@ const UI = {
     // share the exact same board, squads, game-mode, and deploy state.
     if (action.type === 'init') {
       if (!state) return;
-      // Restore host's board, squads, and settings
+      // Restore host's board, squads, units, and settings.
+      // The serialized state already contains all units at x=-1,y=-1 (undeployed)
+      // with the correct IDs — do NOT call startDeploy() again here, because that
+      // would clear units[] and recreate them starting from _uidCounter=8, giving
+      // IDs u9..u16 instead of the host's u1..u8.  deployDone lookups would then
+      // find nothing and both teams would stay invisible.
       state.deserialize(action.state);
-      // Re-run startDeploy so units are created fresh from the now-correct
-      // squadDefs on the shared board.  This is safe to call multiple times —
-      // it simply resets units[] and phase.
-      state.startDeploy();
+      // Ensure all units are marked undeployed so the joiner can place them
+      state.units.forEach(u => { u.x = -1; u.y = -1; u.deployed = false; });
+      state.phase = 'deploy';
+      state.deployingTeam = 0;
       this._enterDeployPhase();
       this._updateAllPanels();
       return;
