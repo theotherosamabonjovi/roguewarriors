@@ -25,6 +25,7 @@ class Engine {
     this.hasMoved      = false;
     this.hasSprinted   = false;
     this.isAiming      = false;
+    this.actionTakenThisActivation = false;
     this.activatedThisRound = new Set();
     this.log           = [];
     this.winner        = null;
@@ -306,6 +307,49 @@ class Engine {
     return reachable;
   }
 
+  // Return the shortest walkable tile path from unit's current position to (toX,toY).
+  // Uses the same BFS rules as getMovementRange (no buildings, no occupied tiles)
+  // but with unlimited range and parent-pointer tracking so the path can be
+  // reconstructed.  Returns an array of {x,y} from the step AFTER the origin
+  // up to and including the destination, e.g. [{x:1,y:0},{x:2,y:0}].
+  // Returns [] if no path exists (shouldn't happen in normal play).
+  getPath(unit, toX, toY) {
+    const start = `${unit.x},${unit.y}`;
+    const goal  = `${toX},${toY}`;
+    if (start === goal) return [];
+
+    const parent  = { [start]: null };
+    const queue   = [{ x: unit.x, y: unit.y }];
+
+    while (queue.length) {
+      const { x, y } = queue.shift();
+      const key = `${x},${y}`;
+      if (key === goal) {
+        // Reconstruct path (excluding the start tile)
+        const path = [];
+        let cur = key;
+        while (cur && cur !== start) {
+          const [px, py] = cur.split(',').map(Number);
+          path.unshift({ x: px, y: py });
+          cur = parent[cur];
+        }
+        return path;
+      }
+      for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const nx = x + dx, ny = y + dy;
+        const nk = `${nx},${ny}`;
+        if (!this._inBounds(nx, ny)) continue;
+        if (nk in parent) continue;
+        if (this.board[ny][nx].type === TILE.BUILDING) continue;
+        // Allow the destination tile even if occupied (unit will vacate it)
+        if (this.getUnitAt(nx, ny) && nk !== goal) continue;
+        parent[nk] = key;
+        queue.push({ x: nx, y: ny });
+      }
+    }
+    return []; // unreachable
+  }
+
   moveUnit(unit, x, y) {
     const tile = this.board[y][x];
     unit.x = x;
@@ -536,12 +580,14 @@ class Engine {
     this.hasMoved     = false;
     this.hasSprinted  = false;
     this.isAiming     = false;
+    this.actionTakenThisActivation = false;
     unit.aiming       = false;
     this.addLog(`— ${unit.name} activated (${MAX_ACTIONS} actions)`, 'activate');
     return true;
   }
 
   useAction(cost = 1) {
+    this.actionTakenThisActivation = true;
     this.actionsLeft -= cost;
     if (this.actionsLeft <= 0) this.endActivation();
   }
@@ -553,6 +599,7 @@ class Engine {
     this.activeUnit  = null;
     this.actionsLeft = 0;
     this.isAiming    = false;
+    this.actionTakenThisActivation = false;
 
     // Check win before swapping
     const winner = this.checkWin();
@@ -587,15 +634,19 @@ class Engine {
   }
 
   // ─── Deselect/deactivate without consuming the activation ─
-  // FIX #3: Mark the unit as activated so it cannot be re-selected this round,
-  // preventing a player from deactivating and re-activating to gain free actions.
+  // Only locks the unit into activatedThisRound if the player actually spent
+  // at least one action. Clicking a unit then clicking away (or switching to
+  // another unit) without acting leaves it free to be activated again.
   deactivateUnit() {
-    if (this.activeUnit) this.activatedThisRound.add(this.activeUnit);
+    if (this.activeUnit && this.actionTakenThisActivation) {
+      this.activatedThisRound.add(this.activeUnit);
+    }
     this.activeUnit  = null;
     this.actionsLeft = MAX_ACTIONS;
     this.hasMoved    = false;
     this.hasSprinted = false;
     this.isAiming    = false;
+    this.actionTakenThisActivation = false;
   }
 
   // ─── Objective initialisation ──────────────────────────────
@@ -793,6 +844,7 @@ class Engine {
       if (u.alive) { u.suppressed = false; u.aiming = false; }
     });
     this.currentPlayer = 0;
+    this.actionTakenThisActivation = false;
     this.addLog(`═══ Round ${this.turn} begins ═══`, 'system');
     if (this.gameMode === 'bomb') this.tickBombTimer();
   }

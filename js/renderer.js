@@ -20,6 +20,9 @@ class Renderer {
     this.flashTimer       = 0;
     this.healTargets      = [];
     this.animFrame        = 0;
+    // Move slide animations: unitId → { fromX, fromY, toX, toY, t, duration }
+    // t counts up from 0 to duration each draw() call.
+    this._moveAnims       = {};
 
     // Resize canvas to match grid
     this.canvas.width  = CFG.COLS * this.T;
@@ -29,6 +32,7 @@ class Renderer {
   // ─── Main draw ────────────────────────────────────────────
   draw(state) {
     this.animFrame++;
+    this._tickMoveAnims();   // advance slide animations each frame
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
@@ -62,6 +66,11 @@ class Renderer {
 
     // Draw heal targets
     if (this.healTargets.length) this._drawHealTargets(state);
+
+    // Draw motion trails for sliding units (behind the unit sprites)
+    state.units.forEach(u => {
+      if (u.alive && u.x >= 0 && this._moveAnims[u.id]) this._drawMoveTrail(state, u);
+    });
 
     // Draw units (skip undeployed)
     state.units.forEach(u => {
@@ -288,8 +297,8 @@ class Renderer {
   _drawUnit(state, unit) {
     const ctx  = this.ctx;
     const T    = this.T;
-    const cx   = unit.x * T + T / 2;
-    const cy   = unit.y * T + T / 2;
+    // Use animated position if a slide is in progress, otherwise snap to tile
+    const { px: cx, py: cy, dustAlpha } = this._unitDrawPos(unit);
     const teamColor = TEAM_COLORS[unit.team];
     const isSelected = this.selectedUnit && this.selectedUnit.id === unit.id;
     const isActive   = state.activeUnit === unit.id;
@@ -380,6 +389,37 @@ class Renderer {
     ctx.shadowBlur = 3;
     ctx.fillText(unit.name.substring(0, 3).toUpperCase(), cx, cy + 24);
     ctx.shadowBlur = 0;
+
+    // Speed lines — short strokes behind the unit in its current travel direction
+    const anim = this._moveAnims[unit.id];
+    if (anim) {
+      const { from, to, raw } = this._animSegment(anim);
+      const dx    = to.x - from.x;
+      const dy    = to.y - from.y;
+      const speed = Math.sqrt(dx * dx + dy * dy);
+      if (speed > 0 && raw < 0.9) {
+        const segRaw  = ((anim.t % anim.framesPerTile)) / anim.framesPerTile;
+        const angle   = Math.atan2(dy, dx);
+        const fadeIn  = Math.min(1, segRaw * 5);
+        const fadeOut = 1 - Math.max(0, (raw - 0.7) / 0.2);
+        const alpha   = fadeIn * fadeOut * 0.55;
+        const lineLen = 10 * (1 - raw * 0.3);
+        ctx.save();
+        ctx.strokeStyle = this._lighten(teamColor, 0.4);
+        ctx.globalAlpha = alpha;
+        ctx.lineWidth   = 1.5;
+        ctx.lineCap     = 'round';
+        for (let i = -1; i <= 1; i++) {
+          const offX = Math.cos(angle + Math.PI / 2) * (i * 4);
+          const offY = Math.sin(angle + Math.PI / 2) * (i * 4);
+          ctx.beginPath();
+          ctx.moveTo(cx + offX, cy + offY);
+          ctx.lineTo(cx - Math.cos(angle) * lineLen + offX, cy - Math.sin(angle) * lineLen + offY);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+    }
 
     ctx.restore();
   }
@@ -586,6 +626,123 @@ class Renderer {
   triggerFlash(unitId) {
     this.flashUnit  = unitId;
     this.flashTimer = 30;
+  }
+
+  // ─── Move slide animation ─────────────────────────────────
+  // Call this BEFORE state.moveUnit() so fromX/fromY are the current position.
+  // isSprint=true uses a slightly longer duration.
+  // path: array of {x,y} tile waypoints from engine.getPath(), excluding origin.
+  // The animation walks each segment at a fixed frames-per-tile rate so longer
+  // paths naturally take longer (sprint is faster per tile).
+  triggerMove(unitId, path, isSprint = false) {
+    if (!path || path.length === 0) return;
+    const framesPerTile = isSprint ? 7 : 10;
+    this._moveAnims[unitId] = {
+      path,           // [{x,y}, ...]  waypoints, not including origin
+      t: 0,
+      duration: path.length * framesPerTile,
+      framesPerTile,
+    };
+  }
+
+  // Advance all in-flight move animations by one frame.
+  _tickMoveAnims() {
+    for (const id of Object.keys(this._moveAnims)) {
+      const a = this._moveAnims[id];
+      a.t++;
+      if (a.t >= a.duration) delete this._moveAnims[id];
+    }
+  }
+
+  // Given a path animation, return the current {fromTile, toTile, segProgress}
+  // where segProgress is 0→1 within the current tile-to-tile segment.
+  _animSegment(anim) {
+    const { path, t, framesPerTile } = anim;
+    // Which segment are we on?
+    const segIdx  = Math.min(Math.floor(t / framesPerTile), path.length - 1);
+    const segT    = (t - segIdx * framesPerTile) / framesPerTile; // 0→1 within seg
+    const ease    = 1 - (1 - Math.min(segT, 1)) * (1 - Math.min(segT, 1)); // ease-out
+    const from    = segIdx === 0
+      ? anim._origin   // set by caller so we always have the true start tile
+      : path[segIdx - 1];
+    const to      = path[segIdx];
+    return { from, to, ease, segIdx, raw: t / anim.duration };
+  }
+
+  // Return the interpolated pixel centre for a unit.
+  _unitDrawPos(unit) {
+    const T    = this.T;
+    const anim = this._moveAnims[unit.id];
+    if (!anim) {
+      return { px: unit.x * T + T / 2, py: unit.y * T + T / 2 };
+    }
+    const { from, to, ease, raw } = this._animSegment(anim);
+    const px = (from.x + (to.x - from.x) * ease) * T + T / 2;
+    const py = (from.y + (to.y - from.y) * ease) * T + T / 2;
+    return { px, py, raw };
+  }
+
+  // Draw ghost-dot trail and arrival dust puff, routing correctly around buildings.
+  _drawMoveTrail(state, unit) {
+    const anim = this._moveAnims[unit.id];
+    if (!anim) return;
+
+    const ctx       = this.ctx;
+    const T         = this.T;
+    const teamColor = TEAM_COLORS[unit.team];
+    const { from, to, ease, raw } = this._animSegment(anim);
+
+    // Current pixel position of the unit
+    const curPx = (from.x + (to.x - from.x) * ease) * T + T / 2;
+    const curPy = (from.y + (to.y - from.y) * ease) * T + T / 2;
+
+    ctx.save();
+
+    // ── Ghost dots — 5 positions trailing back along the path ──────────────
+    // Walk backwards through the path at sub-tile precision to find ghost spots.
+    const GHOSTS = 5;
+    const trailSpacing = anim.framesPerTile * 0.6; // frames between ghost dots
+    for (let i = 1; i <= GHOSTS; i++) {
+      const ghostT = Math.max(0, anim.t - i * trailSpacing);
+      // Re-derive position at ghostT
+      const gSegIdx = Math.min(Math.floor(ghostT / anim.framesPerTile), anim.path.length - 1);
+      const gSegT   = (ghostT - gSegIdx * anim.framesPerTile) / anim.framesPerTile;
+      const gEase   = 1 - (1 - Math.min(gSegT, 1)) * (1 - Math.min(gSegT, 1));
+      const gFrom   = gSegIdx === 0 ? anim._origin : anim.path[gSegIdx - 1];
+      const gTo     = anim.path[gSegIdx];
+      const gx      = (gFrom.x + (gTo.x - gFrom.x) * gEase) * T + T / 2;
+      const gy      = (gFrom.y + (gTo.y - gFrom.y) * gEase) * T + T / 2;
+
+      const r = Math.max(1, (8 - i * 1.2) * (1 - raw * 0.4));
+      const a = (1 - raw) * 0.5 * (1 - i / (GHOSTS + 1));
+      if (a <= 0) continue;
+      ctx.beginPath();
+      ctx.arc(gx, gy, r, 0, Math.PI * 2);
+      ctx.fillStyle = teamColor;
+      ctx.globalAlpha = a;
+      ctx.fill();
+    }
+
+    // ── Dust puff on arrival (last 30% of total animation) ──────────────────
+    if (raw > 0.7) {
+      const puffProgress = (raw - 0.7) / 0.3;
+      const puffAlpha    = (1 - puffProgress) * 0.6;
+      const puffRadius   = 6 + puffProgress * 14;
+      const PUFFS = 6;
+      for (let i = 0; i < PUFFS; i++) {
+        const angle  = (i / PUFFS) * Math.PI * 2 + anim.t * 0.3;
+        const spread = puffProgress * T * 0.45;
+        const px     = curPx + Math.cos(angle) * spread;
+        const py     = curPy + Math.sin(angle) * spread * 0.5;
+        ctx.beginPath();
+        ctx.arc(px, py, Math.max(1, puffRadius * (1 - i / PUFFS / 2)), 0, Math.PI * 2);
+        ctx.fillStyle = '#c8baa0';
+        ctx.globalAlpha = puffAlpha * (1 - i / PUFFS);
+        ctx.fill();
+      }
+    }
+
+    ctx.restore();
   }
 
   _drawDeployZoneFull(state) {

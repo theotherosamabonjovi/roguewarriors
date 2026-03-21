@@ -546,9 +546,13 @@ const UI = {
 
     // Waiting for ability target?
     if (this._abilityMode === 'heal') {
-      if (clickedUnit && clickedUnit.team === state.currentPlayer &&
-          this.renderer.healTargets.includes(clickedUnit.id)) {
-        this._doHeal(activeUnit, clickedUnit);
+      // getUnitAt only returns alive units, but the medic can click a dead
+      // unit's tile to revive them — so we fall back to a dead-unit lookup.
+      const healClick = clickedUnit ||
+        state.units.find(u => !u.alive && u.x === x && u.y === y) || null;
+      if (healClick && healClick.team === state.currentPlayer &&
+          this.renderer.healTargets.includes(healClick.id)) {
+        this._doHeal(activeUnit, healClick);
       } else {
         this._cancelAbilityMode();
       }
@@ -647,6 +651,41 @@ const UI = {
   },
 
   // ─── Action execution ────────────────────────────────────
+
+  // Call after every useAction(). Clears visual state if the activation ended
+  // (useAction triggered endActivation internally), or refreshes highlights if
+  // the unit still has actions left.  This is the single place that decides
+  // what the board looks like after each player action.
+  _afterAction(unit, syncPayload) {
+    const state = this.engine;
+    if (state.phase === 'gameover') {
+      this._clearActionVisuals();
+      this._showGameOver();
+      return;
+    }
+    if (!state.activeUnit) {
+      // endActivation fired — it is now the other player's turn.
+      // Clear every piece of selection/highlight so the board looks neutral.
+      this._clearActionVisuals();
+    } else {
+      // Unit still has actions — refresh highlights for remaining moves/shots.
+      this._showMoveRange(unit, false);
+      this._showAttackHighlights(unit);
+    }
+    this._updateAllPanels();
+    if (syncPayload) this._syncOnline(syncPayload);
+    this._checkAITurn();
+  },
+
+  // Wipe all selection and highlight state from the renderer.
+  _clearActionVisuals() {
+    this.renderer.selectedUnit     = null;
+    this.renderer.moveHighlights   = [];
+    this.renderer.attackHighlights = [];
+    this.renderer.healTargets      = [];
+    this._abilityMode              = null;
+  },
+
   _doMove(unit, x, y) {
     const state = this.engine;
     const sprint = state.hasMoved === false && state.actionsLeft >= 2;
@@ -658,6 +697,14 @@ const UI = {
     if (!inMoveRange && !inSprintRange) return;
     const actualSprint = !inMoveRange && inSprintRange;
 
+    // Trigger slide animation before state.moveUnit() updates the unit's tile coords.
+    // getPath returns BFS waypoints that route around buildings.
+    {
+      const _path = state.getPath(unit, x, y);
+      const _from = { x: unit.x, y: unit.y };
+      this.renderer.triggerMove(unit.id, _path, actualSprint);
+      if (this.renderer._moveAnims[unit.id]) this.renderer._moveAnims[unit.id]._origin = _from;
+    }
     state.moveUnit(unit, x, y);
     state.hasMoved = true;
     if (actualSprint) {
@@ -667,11 +714,7 @@ const UI = {
       state.useAction(1);
     }
 
-    this._showMoveRange(unit, false);
-    this._showAttackHighlights(unit);
-    this._updateAllPanels();
-    this._syncOnline({ type: 'move', unitId: unit.id, x, y, sprint: actualSprint });
-    this._checkAITurn();
+    this._afterAction(unit, { type: 'move', unitId: unit.id, x, y, sprint: actualSprint });
   },
 
   _doShoot(attacker, target) {
@@ -681,13 +724,7 @@ const UI = {
     this.renderer.triggerFlash(target.id);
     this._showDiceResult(result);
     state.useAction(1);
-    if (state.activeUnit) {
-      this._showMoveRange(attacker, false);
-      this._showAttackHighlights(attacker);
-    }
-    this._updateAllPanels();
-    this._syncOnline({ type: 'shoot', unitId: attacker.id, targetId: target.id });
-    this._checkAITurn();
+    this._afterAction(attacker, { type: 'shoot', unitId: attacker.id, targetId: target.id });
   },
 
   _doBlast(attacker, cx, cy) {
@@ -696,20 +733,15 @@ const UI = {
     state.resolveBlast(attacker, cx, cy);
     this.renderer.triggerFlash(attacker.id);
     state.useAction(2);
-    this._cancelAbilityMode();
-    this._updateAllPanels();
-    this._syncOnline({ type: 'blast', unitId: attacker.id, x: cx, y: cy });
-    this._checkAITurn();
+    this._afterAction(attacker, { type: 'blast', unitId: attacker.id, x: cx, y: cy });
   },
 
   _doHeal(medic, target) {
-    const state = this.engine;
-    state.tryHeal(medic, target);
+    const state   = this.engine;
+    const success = state.tryHeal(medic, target);
+    if (!success) return; // tryHeal already logged why (already used, too far)
     state.useAction(1);
-    this._cancelAbilityMode();
-    this._updateAllPanels();
-    this._syncOnline({ type: 'heal', unitId: medic.id, targetId: target.id });
-    this._checkAITurn();
+    this._afterAction(medic, { type: 'heal', unitId: medic.id, targetId: target.id });
   },
 
   _cancelAbilityMode() {
@@ -732,9 +764,7 @@ const UI = {
     state.isAiming = true;
     state.useAction(1);
     state.addLog(`🔭 ${unit.name} aims carefully…`, 'ability');
-    this._updateAllPanels();
-    if (state.activeUnit) this._showAttackHighlights(unit);
-    this._checkAITurn();
+    this._afterAction(unit, null);
   },
 
   btnTakeCover() {
@@ -744,8 +774,7 @@ const UI = {
     unit.inCover = true;
     state.addLog(`🛡️ ${unit.name} takes cover!`, 'ability');
     state.useAction(1);
-    this._updateAllPanels();
-    this._checkAITurn();
+    this._afterAction(unit, null);
   },
 
   btnSprint() {
@@ -769,11 +798,11 @@ const UI = {
       case 'overwatch':
         state.setOverwatch(unit);
         state.useAction(2);
-        this._syncOnline({ type: 'overwatch', unitId: unit.id });
-        this._checkAITurn();
+        this._afterAction(unit, { type: 'overwatch', unitId: unit.id });
         break;
       case 'heal': {
-        // Show heal targets (adjacent allies)
+        // Heal just enters targeting mode — useAction is called in _doHeal
+        // when the player clicks their target, so no _afterAction here.
         const nearby = state.units.filter(u =>
           u.team === unit.team && u.id !== unit.id &&
           Math.max(Math.abs(unit.x - u.x), Math.abs(unit.y - u.y)) <= 1 &&
@@ -783,29 +812,30 @@ const UI = {
         this._abilityMode = 'heal';
         this.renderer.healTargets = nearby.map(u => u.id);
         state.addLog(`💉 ${unit.name}: click an adjacent ally to heal`, 'ability');
+        this._updateAllPanels();
         break;
       }
       case 'blast': {
-        // Show blast targets
+        // Blast just enters targeting mode — useAction is called in _doBlast.
         const targets = state.getValidTargets(unit);
         if (!targets.length) { this.showNotif('No targets in range!', 'warn'); return; }
         this._abilityMode = 'blast';
         this.renderer.attackHighlights = targets.map(t => t.id);
         state.addLog(`💥 ${unit.name}: click an enemy to throw grenade`, 'ability');
+        this._updateAllPanels();
         break;
       }
       case 'stealth':
         state.addLog(`👻 ${unit.name} activates Stealth — hard to target in cover!`, 'ability');
         state.useAction(1);
-        this._checkAITurn();
+        this._afterAction(unit, null);
         break;
       case 'command':
         state.addLog(`📣 ${unit.name} rallies the squad — Command Aura active!`, 'ability');
         state.useAction(1);
-        this._checkAITurn();
+        this._afterAction(unit, null);
         break;
     }
-    this._updateAllPanels();
   },
 
   btnCharge() {
@@ -824,28 +854,17 @@ const UI = {
     const result = state.resolveMelee(unit, target);
     this._showMeleeResult(result);
     state.useAction(2);
-    this._updateAllPanels();
-    this._syncOnline({ type: 'charge', unitId: unit.id, targetId: target.id });
-    this._checkAITurn();
+    this._afterAction(unit, { type: 'charge', unitId: unit.id, targetId: target.id });
   },
 
   btnEndActivation() {
     const state = this.engine;
     if (!state.getActiveUnit()) return;
     state.endActivation();
-    this.renderer.selectedUnit     = null;
-    this.renderer.moveHighlights   = [];
-    this.renderer.attackHighlights = [];
-    this.renderer.healTargets      = [];
-    this._abilityMode = null;
+    this._clearActionVisuals();
     this._updateAllPanels();
     this._syncOnline({ type: 'end' });
-
-    if (state.phase === 'gameover') {
-      this._showGameOver();
-      return;
-    }
-
+    if (state.phase === 'gameover') { this._showGameOver(); return; }
     this._checkAITurn();
   },
 
@@ -886,6 +905,12 @@ const UI = {
       case 'sprint':
         if (!state.getActiveUnit()) state.activateUnit(unit);
         if (unit && state._inBounds(action.x, action.y)) {
+          {
+            const _path = state.getPath(unit, action.x, action.y);
+            const _from = { x: unit.x, y: unit.y };
+            this.renderer.triggerMove(unit.id, _path, action.type === 'sprint');
+            if (this.renderer._moveAnims[unit.id]) this.renderer._moveAnims[unit.id]._origin = _from;
+          }
           state.moveUnit(unit, action.x, action.y);
           if (action.sprint) { state.hasSprinted = true; state.useAction(2); }
           else state.useAction(1);
@@ -998,6 +1023,12 @@ const UI = {
         const legalTiles = state.getMovementRange(unit, isSprint);
         const isLegal = legalTiles.some(t => t.x === action.x && t.y === action.y);
         if (!isLegal) return;
+        {
+          const _path = state.getPath(unit, action.x, action.y);
+          const _from = { x: unit.x, y: unit.y };
+          this.renderer.triggerMove(unit.id, _path, isSprint);
+          if (this.renderer._moveAnims[unit.id]) this.renderer._moveAnims[unit.id]._origin = _from;
+        }
         state.moveUnit(unit, action.x, action.y);
         isSprint ? (state.hasSprinted = true, state.useAction(2)) : state.useAction(1);
         break;
@@ -1108,9 +1139,22 @@ const UI = {
       objStatus = ' · 👑 Alpha: protect VIP. Bravo: eliminate them.';
     }
 
+    // Activation counters — how many alive units each team has activated this round
+    const countActivated = (team) => {
+      const alive = state.units.filter(u => u.alive && u.team === team);
+      const done  = alive.filter(u => state.activatedThisRound.has(u.id));
+      // Also count the currently-active unit if it has taken an action
+      const activeIsThisTeam = state.activeUnit &&
+        state.getUnit(state.activeUnit)?.team === team &&
+        state.actionTakenThisActivation;
+      const doneCount = done.length + (activeIsThisTeam && !done.some(u => u.id === state.activeUnit) ? 1 : 0);
+      return `${doneCount}/${alive.length}`;
+    };
+    const counter = `<span style="opacity:0.7;font-size:0.88em"> · ✅ ${countActivated(0)} / ${countActivated(1)}</span>`;
+
     banner.innerHTML = active
-      ? `Round ${state.turn} — <span style="color:${TEAM_COLORS[cp]}">${name}</span> — ${active.name} (${state.actionsLeft} action${state.actionsLeft !== 1 ? 's' : ''} left)${objStatus}`
-      : `Round ${state.turn} — <span style="color:${TEAM_COLORS[cp]}">${name}</span> — Click a unit to activate${objStatus}`;
+      ? `Round ${state.turn} — <span style="color:${TEAM_COLORS[cp]}">${name}</span> — ${active.name} (${state.actionsLeft} action${state.actionsLeft !== 1 ? 's' : ''} left)${objStatus}${counter}`
+      : `Round ${state.turn} — <span style="color:${TEAM_COLORS[cp]}">${name}</span> — Click a unit to activate${objStatus}${counter}`;
     banner.className = `turn-banner team-${cp}`;
   },
 
