@@ -72,9 +72,16 @@ class Renderer {
       if (u.alive && u.x >= 0 && this._moveAnims[u.id]) this._drawMoveTrail(state, u);
     });
 
-    // Draw units (skip undeployed)
+    // Draw units (skip undeployed).
+    // During the deploy phase in online mode, hide the opponent's placements
+    // so neither player can see where the other is putting their units.
     state.units.forEach(u => {
-      if (u.alive && u.x >= 0 && u.y >= 0) this._drawUnit(state, u);
+      if (!u.alive || u.x < 0 || u.y < 0) return;
+      if (state.phase === 'deploy' &&
+          this._onlineMyTeam !== null &&
+          this._onlineMyTeam !== undefined &&
+          u.team !== this._onlineMyTeam) return; // hidden until battle starts
+      this._drawUnit(state, u);
     });
 
     // Draw dead units (tombstones, skip undeployed)

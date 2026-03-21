@@ -121,23 +121,20 @@ const UI = {
       this.showNotif('You need at least 1 Leader in your squad!', 'warn'); return;
     }
     if (this.mode === 'online') {
-      // Exchange squads before starting. Each player sends their built squad
-      // to the opponent so both engines end up with identical unit lists.
-      this._syncOnline({ type: 'squad', units: squad });
-
-      if (this.mp?.isHost) {
-        // Host stores their own squad and waits for the joiner's squad to
-        // arrive (handled in _handleRemoteAction 'squad' case) before
-        // proceeding to the battlefield screen.
-        this.armyDraft[0] = squad;
-        this.showNotif('Squad locked — waiting for opponent…', 'info');
-      } else {
-        // Joiner goes straight to battlefield; the host's 'init' message
-        // will arrive and overwrite the engine with the correct shared state.
-        this.armyDraft[1] = squad;
-        this.showScreen('screen-battlefield');
-        this.initBattlefieldSetup();
-      }
+      // Each player sends their squad AND a 'ready' flag.
+      // Neither side advances to the battlefield until BOTH have sent 'ready'.
+      // This prevents one player from clicking through to the map-select screen
+      // while the other is still picking units.
+      const myTeamIdx = this.mp?.isHost ? 0 : 1;
+      this.armyDraft[myTeamIdx] = squad;
+      this._onlineReady = (this._onlineReady || 0) | (1 << myTeamIdx); // mark self ready
+      this._syncOnline({ type: 'squadReady', units: squad });
+      document.getElementById('army-confirm-btn') &&
+        (document.getElementById('army-confirm-btn').disabled = true);
+      this.showNotif('Squad locked — waiting for opponent…', 'info');
+      // If both happened to click ready before the message round-tripped
+      // (e.g. single machine testing), check now.
+      if ((this._onlineReady & 3) === 3) this._bothSquadsReady();
     } else if (this.mode === 'ai' || p === this.myTeam) {
       // AI builds its own squad
       if (this.mode === 'ai') {
@@ -152,6 +149,14 @@ const UI = {
       this.showScreen('screen-battlefield');
       this.initBattlefieldSetup();
     }
+  },
+
+  // Called when both players have confirmed their squads.  Advances to the
+  // battlefield selection screen.  Resets the ready flag for next time.
+  _bothSquadsReady() {
+    this._onlineReady = 0;
+    this.showScreen('screen-battlefield');
+    this.initBattlefieldSetup();
   },
 
   _buildAISquad() {
@@ -371,17 +376,30 @@ const UI = {
     // onConnect handler so it is wired before the army-builder squad messages
     // fly, not here where it would be too late.
 
+    // Tell the renderer which team is local so it can hide the opponent's
+    // deploy positions until the battle starts.
+    if (this.mode === 'online') {
+      this.renderer._onlineMyTeam = this.myTeam;
+    }
+
     // Start interactive deployment
     eng.startDeploy();
     this._enterDeployPhase();
 
     // Synchronise engines over the network.
-    // We use a request/response handshake so there is no timing race:
-    //   Host  : waits — it will send 'init' only when the joiner asks for it.
-    //   Joiner: sends 'requestInit' now that onAction is wired up.
-    // This guarantees the joiner's callback is set before the init payload lands.
-    if (this.mode === 'online' && !this.mp?.isHost) {
-      this._syncOnline({ type: 'requestInit' });
+    // Both sides send a message so whichever player clicks "Deploy & Fight"
+    // second will always get/send the authoritative state:
+    //   Host  : sends 'init' immediately AND handles 'requestInit' replies.
+    //   Joiner: sends 'requestInit' so the host re-sends if host was first.
+    // This covers both orderings without a race.
+    if (this.mode === 'online') {
+      if (this.mp?.isHost) {
+        // Host proactively pushes their engine to whoever is already listening
+        this._syncOnline({ type: 'init', state: eng.serialize() });
+      } else {
+        // Joiner asks for the host's engine in case the host isn't ready yet
+        this._syncOnline({ type: 'requestInit' });
+      }
     }
   },
 
@@ -395,13 +413,15 @@ const UI = {
     document.getElementById('actions-section').style.display = 'none';
     document.getElementById('stats-section').style.display   = 'none';
 
-    this._renderDeployPanel(state.deployingTeam);
+    // In online mode both deploy simultaneously — always show own team panel
+    const deployTeam = (this.mode === 'online') ? this.myTeam : state.deployingTeam;
+    this._renderDeployPanel(deployTeam);
     this._updateDeployBanner();
     this._updateTeamPanels();
     this._updateLog();
 
-    // Show deploy zone highlights for current team
-    this.renderer.deployHighlights = state.deployZone(state.deployingTeam);
+    // Show deploy zone highlights for the local player's team only
+    this.renderer.deployHighlights = state.deployZone(deployTeam);
     this._deploySelectedUnit = null;
   },
 
@@ -438,9 +458,11 @@ const UI = {
       panel.appendChild(card);
     });
 
-    // Enable Done button only when all units of this team are deployed
+    // Enable Done button only when all units of this team are deployed.
+    // Always reset text in case a previous session left it as "Waiting…".
     const allPlaced = units.every(u => u.deployed);
-    doneBtn.disabled = !allPlaced;
+    doneBtn.textContent = '✅ Done Deploying';
+    doneBtn.disabled = !allPlaced || !!this._localDeployDone;
   },
 
   _selectDeployUnit(unit) {
@@ -454,7 +476,8 @@ const UI = {
 
   _handleDeployClick(x, y) {
     const state = this.engine;
-    const team  = state.deployingTeam;
+    // In online mode both players deploy simultaneously — use myTeam, not deployingTeam.
+    const team  = (this.mode === 'online') ? this.myTeam : state.deployingTeam;
 
     // Click on already-placed friendly unit = pick it back up
     const existingUnit = state.getUnitAt(x, y);
@@ -487,36 +510,58 @@ const UI = {
 
   finishDeployment() {
     const state = this.engine;
-    const team  = state.deployingTeam;
+    // In online mode both players deploy simultaneously, so use myTeam.
+    const team  = (this.mode === 'online') ? this.myTeam : state.deployingTeam;
     const unplaced = state.units.filter(u => u.team === team && !u.deployed);
     if (unplaced.length) { this.showNotif('Place all your units first!', 'warn'); return; }
 
-    state.finishTeamDeploy();
-
-    // In online mode, broadcast each unit's final deployed position so the
-    // opponent can mirror the placement on their engine copy.
     if (this.mode === 'online') {
+      // Mark local deploy done and send positions.
+      // Don't call finishTeamDeploy() yet — battle only starts when BOTH sides
+      // have confirmed.  The deployDone handler will start battle when ready.
+      this._localDeployDone = true;
       const deployedUnits = state.units
         .filter(u => u.team === this.myTeam && u.deployed)
         .map(u => ({ id: u.id, x: u.x, y: u.y }));
       this._syncOnline({ type: 'deployDone', units: deployedUnits });
+      // Update button and banner to show we're waiting
+      const doneBtn = document.getElementById('deploy-done-btn');
+      if (doneBtn) { doneBtn.disabled = true; doneBtn.textContent = '⏳ Waiting for opponent…'; }
+      document.getElementById('lobby-status') &&
+        (document.getElementById('lobby-status').textContent = '');
+      // Check immediately in case remoteDeployDone arrived first
+      if (this._remoteDeployDone) this._startBattleOnline();
+      return;
     }
 
+    // Local / AI modes: sequential deploy as before
+    state.finishTeamDeploy();
     if (state.phase === 'playing') {
-      // Both teams deployed — start battle
       this._exitDeployPhase();
     } else {
-      // Team 1's turn — AI or human
       if (this.mode === 'ai' && state.deployingTeam === 1) {
-        // AI auto-deploys
         state.autoDeployTeam(1);
         state.finishTeamDeploy();
         this._exitDeployPhase();
       } else {
-        // Local or online: next human deploys
         this._enterDeployPhase();
       }
     }
+  },
+
+  // Called when both players have finished deploying in online mode.
+  _startBattleOnline() {
+    const state = this.engine;
+    this._localDeployDone  = false;
+    this._remoteDeployDone = false;
+    // Ensure the engine is in playing state — call _beginBattle directly
+    // since both squads are placed and we're bypassing the sequential deploy.
+    if (state.phase !== 'playing') {
+      // Force both teams' deployingTeam flags done then start battle
+      state.deployingTeam = 0; state.finishTeamDeploy(); // → deployingTeam=1
+      state.finishTeamDeploy(); // → _beginBattle
+    }
+    this._exitDeployPhase();
   },
 
   _exitDeployPhase() {
@@ -524,7 +569,10 @@ const UI = {
     document.getElementById('actions-section').style.display = 'block';
     document.getElementById('stats-section').style.display   = 'flex';
     this.renderer.deployHighlights = [];
+    this.renderer._onlineMyTeam    = null; // reveal all units now that battle starts
     this._deploySelectedUnit = null;
+    this._localDeployDone  = false;
+    this._remoteDeployDone = false;
     this._updateAllPanels();
     this._checkAITurn();
   },
@@ -533,11 +581,15 @@ const UI = {
     const state  = this.engine;
     const banner = document.getElementById('turn-banner');
     if (!banner || state.phase !== 'deploy') return;
-    const team  = state.deployingTeam;
+    // In online mode both players deploy simultaneously — show the local
+    // player's own team name and progress, not the sequential deployingTeam.
+    const team  = (this.mode === 'online') ? this.myTeam : state.deployingTeam;
     const color = TEAM_COLORS[team];
     const placed = state.units.filter(u => u.team === team && u.deployed).length;
     const total  = state.units.filter(u => u.team === team).length;
-    banner.innerHTML = `⚔ Deploy Phase — <span style="color:${color}">${state.players[team].name}</span> — Place your units (${placed}/${total} placed)`;
+    const waitMsg = (this.mode === 'online' && this._localDeployDone)
+      ? ' — ⏳ Waiting for opponent…' : '';
+    banner.innerHTML = `⚔ Deploy Phase — <span style="color:${color}">${state.players[team].name}</span> — Place your units (${placed}/${total} placed)${waitMsg}`;
     banner.className = `turn-banner team-${team}`;
   },
 
@@ -575,7 +627,8 @@ const UI = {
     // Deploy phase
     if (state.phase === 'deploy') {
       // Only let the current deploying team's human interact
-      const isMyDeploy = this.mode !== 'online' || state.deployingTeam === this.myTeam;
+      // In online mode each player deploys simultaneously — guard by unit ownership, not deployingTeam.
+      const isMyDeploy = this.mode !== 'online' || true;
       if (isMyDeploy) this._handleDeployClick(x, y);
       return;
     }
@@ -705,16 +758,19 @@ const UI = {
       return;
     }
     if (!state.activeUnit) {
-      // endActivation fired — it is now the other player's turn.
-      // Clear every piece of selection/highlight so the board looks neutral.
+      // endActivation fired internally (actionsLeft hit 0).
+      // Clear visuals and tell the remote client to also end the activation,
+      // advancing their currentPlayer so they can take their turn.
       this._clearActionVisuals();
+      if (syncPayload) this._syncOnline(syncPayload);
+      this._syncOnline({ type: 'end' });  // explicit end so remote advances turn
     } else {
       // Unit still has actions — refresh highlights for remaining moves/shots.
       this._showMoveRange(unit, false);
       this._showAttackHighlights(unit);
+      if (syncPayload) this._syncOnline(syncPayload);
     }
     this._updateAllPanels();
-    if (syncPayload) this._syncOnline(syncPayload);
     this._checkAITurn();
   },
 
@@ -765,16 +821,26 @@ const UI = {
     this.renderer.triggerFlash(target.id);
     this._showDiceResult(result);
     state.useAction(1);
-    this._afterAction(attacker, { type: 'shoot', unitId: attacker.id, targetId: target.id });
+    // Send the authoritative result so the remote applies the same wounds/rolls,
+    // not a separate independent dice roll that could differ.
+    this._afterAction(attacker, {
+      type: 'shoot', unitId: attacker.id, targetId: target.id,
+      result: { rolls: result.rolls, saves: result.saves, wounds: result.wounds,
+                hitCount: result.hitCount, targetNum: result.targetNum }
+    });
   },
 
   _doBlast(attacker, cx, cy) {
     const state = this.engine;
     if (state.actionsLeft < 2) return;
-    state.resolveBlast(attacker, cx, cy);
+    const results = state.resolveBlast(attacker, cx, cy);
     this.renderer.triggerFlash(attacker.id);
     state.useAction(2);
-    this._afterAction(attacker, { type: 'blast', unitId: attacker.id, x: cx, y: cy });
+    this._afterAction(attacker, {
+      type: 'blast', unitId: attacker.id, x: cx, y: cy,
+      results: results.map(r => ({ targetId: r.target, wounds: r.wounds,
+                                   rolls: r.rolls, saves: r.saves }))
+    });
   },
 
   _doHeal(medic, target) {
@@ -805,7 +871,7 @@ const UI = {
     state.isAiming = true;
     state.useAction(1);
     state.addLog(`🔭 ${unit.name} aims carefully…`, 'ability');
-    this._afterAction(unit, null);
+    this._afterAction(unit, { type: 'aim', unitId: unit.id });
   },
 
   btnTakeCover() {
@@ -815,7 +881,7 @@ const UI = {
     unit.inCover = true;
     state.addLog(`🛡️ ${unit.name} takes cover!`, 'ability');
     state.useAction(1);
-    this._afterAction(unit, null);
+    this._afterAction(unit, { type: 'cover', unitId: unit.id });
   },
 
   btnSprint() {
@@ -869,12 +935,12 @@ const UI = {
       case 'stealth':
         state.addLog(`👻 ${unit.name} activates Stealth — hard to target in cover!`, 'ability');
         state.useAction(1);
-        this._afterAction(unit, null);
+        this._afterAction(unit, { type: 'ability', unitId: unit.id, ability: 'stealth' });
         break;
       case 'command':
         state.addLog(`📣 ${unit.name} rallies the squad — Command Aura active!`, 'ability');
         state.useAction(1);
-        this._afterAction(unit, null);
+        this._afterAction(unit, { type: 'ability', unitId: unit.id, ability: 'command' });
         break;
     }
   },
@@ -1037,17 +1103,13 @@ const UI = {
     // squads, and game-mode settings.  The joiner's own startGame() already
     // set up the renderer/canvas; we just overwrite the engine data here.
     // ── Squad exchange (army builder phase) ────────────────────────────────
-    // When one player confirms their army they broadcast their unit list.
-    // The host waits for the joiner's squad before proceeding to battlefield.
-    if (action.type === 'squad') {
-      const remoteTeam = this.mp?.isHost ? 1 : 0;  // which team sent this
+    // squadReady: a player has confirmed their army.  Store their squad and
+    // check if both sides are ready.  Neither side advances until both send this.
+    if (action.type === 'squadReady') {
+      const remoteTeam = this.mp?.isHost ? 1 : 0;
       this.armyDraft[remoteTeam] = action.units || [];
-      if (this.mp?.isHost) {
-        // Host now has both squads — proceed to battlefield
-        this.showScreen('screen-battlefield');
-        this.initBattlefieldSetup();
-      }
-      // Joiner already proceeded to battlefield in confirmArmy; nothing to do
+      this._onlineReady = (this._onlineReady || 0) | (1 << remoteTeam);
+      if ((this._onlineReady & 3) === 3) this._bothSquadsReady();
       return;
     }
 
@@ -1070,23 +1132,22 @@ const UI = {
       return;
     }
 
-    // 'deployDone': a player finished placing their units.  Mirror their
-    // positions onto this client's engine so both boards match before battle.
+    // 'deployDone': opponent finished placing their units.  Mirror their
+    // positions locally, then start battle once BOTH sides are done.
     if (action.type === 'deployDone') {
       if (!state) return;
       for (const u of (action.units || [])) {
         const unit = state.getUnit(u.id);
         if (unit) { unit.x = u.x; unit.y = u.y; unit.deployed = true; }
       }
-      // Advance the deploy phase on this client to match the sender's state.
-      // finishTeamDeploy moves deployingTeam from 0→1 or kicks off battle.
-      state.finishTeamDeploy();
-      if (state.phase === 'playing') {
-        this._exitDeployPhase();
+      this._remoteDeployDone = true;
+      if (this._localDeployDone) {
+        // Both players are done — start battle
+        this._startBattleOnline();
       } else {
-        this._enterDeployPhase();   // now show the local player's deploy turn
+        // We haven't finished yet — just refresh so the banner updates
+        this._updateAllPanels();
       }
-      this._updateAllPanels();
       return;
     }
 
@@ -1118,7 +1179,6 @@ const UI = {
 
     switch (action.type) {
       case 'move': {
-        // Validate destination is in legal movement range
         const isSprint = !!action.sprint;
         const legalTiles = state.getMovementRange(unit, isSprint);
         const isLegal = legalTiles.some(t => t.x === action.x && t.y === action.y);
@@ -1133,28 +1193,48 @@ const UI = {
         isSprint ? (state.hasSprinted = true, state.useAction(2)) : state.useAction(1);
         break;
       }
+      case 'aim':
+        // Sync aiming state — needed so remote resolveShoot applies the aim bonus
+        unit.aiming    = true;
+        state.isAiming = true;
+        state.useAction(1);
+        break;
+      case 'cover':
+        unit.inCover = true;
+        state.useAction(1);
+        break;
       case 'shoot': {
-        // Target must be a valid target for this unit
-        const validTargets = state.getValidTargets(unit);
-        const t = validTargets.find(v => v.id === action.targetId);
+        const t = state.getUnit(action.targetId);
         if (!t) return;
-        const r = state.resolveShoot(unit, t);
-        this.renderer.triggerFlash(t.id);   // show hit flash same as local shoot
-        this._showDiceResult(r);
+        if (action.result) {
+          // Apply the authoritative result sent by the shooter — no re-roll
+          this._applyRemoteCombatResult(unit, t, action.result);
+        } else {
+          // Fallback: re-resolve locally (older client compatibility)
+          const r = state.resolveShoot(unit, t);
+          this._showDiceResult(r);
+        }
+        this.renderer.triggerFlash(t.id);
         state.useAction(1);
         break;
       }
       case 'blast': {
-        // Blast centre must be in bounds and within range
         if (!state._inBounds(action.x, action.y)) return;
         const dist = Math.max(Math.abs(unit.x - action.x), Math.abs(unit.y - action.y));
         if (dist > unit.range) return;
-        state.resolveBlast(unit, action.x, action.y);
+        if (action.results) {
+          // Apply authoritative per-target results
+          for (const res of action.results) {
+            const tgt = state.getUnit(res.targetId);
+            if (tgt) this._applyRemoteCombatResult(unit, tgt, res);
+          }
+        } else {
+          state.resolveBlast(unit, action.x, action.y);
+        }
         state.useAction(2);
         break;
       }
       case 'heal': {
-        // Heal target must be an adjacent ally
         const ht = state.getUnit(action.targetId);
         if (!ht || ht.team !== remTeam) return;
         const hDist = Math.max(Math.abs(unit.x - ht.x), Math.abs(unit.y - ht.y));
@@ -1167,6 +1247,10 @@ const UI = {
         state.setOverwatch(unit);
         state.useAction(2);
         break;
+      case 'ability':
+        // Passive ability activation (stealth, command) — just consume the action
+        state.useAction(1);
+        break;
       default:
         return; // unknown action type — ignore
     }
@@ -1176,6 +1260,37 @@ const UI = {
     if (!state.activeUnit) this._clearActionVisuals();
     this._updateAllPanels();
     if (state.phase === 'gameover') this._showGameOver();
+  },
+
+  // Apply an authoritative combat result sent by the remote shooter.
+  // Directly sets hp, alive, suppressed from the sender's dice — no local re-roll.
+  _applyRemoteCombatResult(attacker, target, res) {
+    if (!res || typeof res.wounds !== 'number') return;
+    if (res.wounds > 0) {
+      target.hp -= res.wounds;
+      if (target.hp <= 0) {
+        target.alive = false;
+        target.hp    = 0;
+        this.engine.addLog(`💀 ${target.name} is eliminated!`, 'death');
+        if (this.engine.gameMode === 'ctf') this.engine.dropFlag(target.id);
+        this.engine.checkObjectiveWin();
+      } else {
+        target.suppressed = true;
+        this.engine.addLog(`${target.name} is hit and suppressed!`, 'hit');
+      }
+    } else {
+      this.engine.addLog(`${attacker.name} misses!`, 'miss');
+    }
+    attacker.aiming = false;
+    // Show the dice the remote rolled
+    if (res.rolls) this._showDiceResult({ ...res, attacker: attacker.id, target: target.id });
+    if (target.alive === false) {
+      const winner = this.engine.checkWin();
+      if (winner !== null) {
+        this.engine.phase  = 'gameover';
+        this.engine.winner = winner;
+      }
+    }
   },
 
   // ─── Render loop ────────────────────────────────────────
