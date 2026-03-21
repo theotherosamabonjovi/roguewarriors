@@ -367,7 +367,9 @@ const UI = {
     this.startRenderLoop();
 
     // Wire multiplayer callbacks now that the engine exists
-    if (this.mode === 'online') this._setupMultiplayerCallbacks();
+    // Note: _setupMultiplayerCallbacks() is called in hostGame/joinGame's
+    // onConnect handler so it is wired before the army-builder squad messages
+    // fly, not here where it would be too late.
 
     // Start interactive deployment
     eng.startDeploy();
@@ -1608,6 +1610,7 @@ const UI = {
         document.getElementById('lobby-status').textContent = 'Waiting for opponent to join…';
       },
       () => {
+        this._setupMultiplayerCallbacks();   // wire onAction before any messages fly
         document.getElementById('lobby-status').textContent = '✅ Opponent connected! Starting army builder…';
         setTimeout(() => { this.showScreen('screen-army'); this.initArmyBuilder(0); }, 1000);
       }
@@ -1621,6 +1624,7 @@ const UI = {
     this.myTeam = 1;
     this.mp.join(code,
       () => {
+        this._setupMultiplayerCallbacks();   // wire onAction before any messages fly
         document.getElementById('lobby-status').textContent = '✅ Connected! Starting army builder…';
         setTimeout(() => { this.showScreen('screen-army'); this.initArmyBuilder(1); }, 1000);
       }
