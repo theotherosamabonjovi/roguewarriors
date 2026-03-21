@@ -73,14 +73,14 @@ class Renderer {
     });
 
     // Draw units (skip undeployed).
-    // During the deploy phase in online mode, hide the opponent's placements
-    // so neither player can see where the other is putting their units.
+    // During online deploy, hide the opponent's units so neither player can
+    // see where the other is placing.  _onlineMyTeam is set to 0 or 1 while
+    // in the deploy phase and cleared back to null by _exitDeployPhase the
+    // moment battle starts, so this guard is automatically inactive in play.
     state.units.forEach(u => {
       if (!u.alive || u.x < 0 || u.y < 0) return;
-      if (state.phase === 'deploy' &&
-          this._onlineMyTeam !== null &&
-          this._onlineMyTeam !== undefined &&
-          u.team !== this._onlineMyTeam) return; // hidden until battle starts
+      if ((this._onlineMyTeam === 0 || this._onlineMyTeam === 1) &&
+          u.team !== this._onlineMyTeam) return;
       this._drawUnit(state, u);
     });
 
