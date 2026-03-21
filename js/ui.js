@@ -120,7 +120,25 @@ const UI = {
     if (!hasLeader) {
       this.showNotif('You need at least 1 Leader in your squad!', 'warn'); return;
     }
-    if (this.mode === 'ai' || (this.mode === 'online' && p === this.myTeam)) {
+    if (this.mode === 'online') {
+      // Exchange squads before starting. Each player sends their built squad
+      // to the opponent so both engines end up with identical unit lists.
+      this._syncOnline({ type: 'squad', units: squad });
+
+      if (this.mp?.isHost) {
+        // Host stores their own squad and waits for the joiner's squad to
+        // arrive (handled in _handleRemoteAction 'squad' case) before
+        // proceeding to the battlefield screen.
+        this.armyDraft[0] = squad;
+        this.showNotif('Squad locked — waiting for opponent…', 'info');
+      } else {
+        // Joiner goes straight to battlefield; the host's 'init' message
+        // will arrive and overwrite the engine with the correct shared state.
+        this.armyDraft[1] = squad;
+        this.showScreen('screen-battlefield');
+        this.initBattlefieldSetup();
+      }
+    } else if (this.mode === 'ai' || p === this.myTeam) {
       // AI builds its own squad
       if (this.mode === 'ai') {
         this.armyDraft[1] = this._buildAISquad();
@@ -348,9 +366,21 @@ const UI = {
     this._setupGameCanvas();
     this.startRenderLoop();
 
+    // Wire multiplayer callbacks now that the engine exists
+    if (this.mode === 'online') this._setupMultiplayerCallbacks();
+
     // Start interactive deployment
     eng.startDeploy();
     this._enterDeployPhase();
+
+    // Synchronise engines over the network.
+    // We use a request/response handshake so there is no timing race:
+    //   Host  : waits — it will send 'init' only when the joiner asks for it.
+    //   Joiner: sends 'requestInit' now that onAction is wired up.
+    // This guarantees the joiner's callback is set before the init payload lands.
+    if (this.mode === 'online' && !this.mp?.isHost) {
+      this._syncOnline({ type: 'requestInit' });
+    }
   },
 
   // ─── Deployment phase UI ─────────────────────────────────
@@ -460,6 +490,15 @@ const UI = {
     if (unplaced.length) { this.showNotif('Place all your units first!', 'warn'); return; }
 
     state.finishTeamDeploy();
+
+    // In online mode, broadcast each unit's final deployed position so the
+    // opponent can mirror the placement on their engine copy.
+    if (this.mode === 'online') {
+      const deployedUnits = state.units
+        .filter(u => u.team === this.myTeam && u.deployed)
+        .map(u => ({ id: u.id, x: u.x, y: u.y }));
+      this._syncOnline({ type: 'deployDone', units: deployedUnits });
+    }
 
     if (state.phase === 'playing') {
       // Both teams deployed — start battle
@@ -989,6 +1028,66 @@ const UI = {
     const state   = this.engine;
     const remTeam = this.mp.isHost ? 1 : 0;  // remote player's team
 
+    // ── Pre-game messages — handled before any turn-order checks ─────────────
+
+    // 'init': host sends their full serialized engine right after startGame().
+    // The joiner deserializes it so both clients share the exact same board,
+    // squads, and game-mode settings.  The joiner's own startGame() already
+    // set up the renderer/canvas; we just overwrite the engine data here.
+    // ── Squad exchange (army builder phase) ────────────────────────────────
+    // When one player confirms their army they broadcast their unit list.
+    // The host waits for the joiner's squad before proceeding to battlefield.
+    if (action.type === 'squad') {
+      const remoteTeam = this.mp?.isHost ? 1 : 0;  // which team sent this
+      this.armyDraft[remoteTeam] = action.units || [];
+      if (this.mp?.isHost) {
+        // Host now has both squads — proceed to battlefield
+        this.showScreen('screen-battlefield');
+        this.initBattlefieldSetup();
+      }
+      // Joiner already proceeded to battlefield in confirmArmy; nothing to do
+      return;
+    }
+
+    // Joiner asks the host for the authoritative engine state.
+    // Host replies with 'init' carrying the full serialized engine.
+    if (action.type === 'requestInit') {
+      if (this.mp?.isHost && state) {
+        this._syncOnline({ type: 'init', state: state.serialize() });
+      }
+      return;
+    }
+
+    // Joiner receives the host's engine — overwrite local copy so both clients
+    // share the exact same board, squads, game-mode, and deploy state.
+    if (action.type === 'init') {
+      if (!state) return;
+      state.deserialize(action.state);
+      this._enterDeployPhase();
+      this._updateAllPanels();
+      return;
+    }
+
+    // 'deployDone': a player finished placing their units.  Mirror their
+    // positions onto this client's engine so both boards match before battle.
+    if (action.type === 'deployDone') {
+      if (!state) return;
+      for (const u of (action.units || [])) {
+        const unit = state.getUnit(u.id);
+        if (unit) { unit.x = u.x; unit.y = u.y; unit.deployed = true; }
+      }
+      // Advance the deploy phase on this client to match the sender's state.
+      // finishTeamDeploy moves deployingTeam from 0→1 or kicks off battle.
+      state.finishTeamDeploy();
+      if (state.phase === 'playing') {
+        this._exitDeployPhase();
+      } else {
+        this._enterDeployPhase();   // now show the local player's deploy turn
+      }
+      this._updateAllPanels();
+      return;
+    }
+
     // ── FIX #7: Gate every action behind the same legality checks used locally ──
 
     // 1. Must be remote team's turn
@@ -997,8 +1096,7 @@ const UI = {
     // 2. 'end' doesn't need a unit
     if (action.type === 'end') {
       state.endActivation();
-      this.renderer.selectedUnit    = null;
-      this.renderer.moveHighlights  = [];
+      this._clearActionVisuals();   // wipe stale highlights so local player sees a clean board
       this._updateAllPanels();
       if (state.phase === 'gameover') this._showGameOver();
       return;
@@ -1039,6 +1137,7 @@ const UI = {
         const t = validTargets.find(v => v.id === action.targetId);
         if (!t) return;
         const r = state.resolveShoot(unit, t);
+        this.renderer.triggerFlash(t.id);   // show hit flash same as local shoot
         this._showDiceResult(r);
         state.useAction(1);
         break;
@@ -1070,6 +1169,9 @@ const UI = {
         return; // unknown action type — ignore
     }
 
+    // If the remote action ended their activation, clear any stale visual
+    // selection state so the local player sees a clean board for their turn.
+    if (!state.activeUnit) this._clearActionVisuals();
     this._updateAllPanels();
     if (state.phase === 'gameover') this._showGameOver();
   },
