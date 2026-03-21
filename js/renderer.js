@@ -103,7 +103,8 @@ class Renderer {
     this._drawDeployMarkers(state);
 
     // Flash effect for recent combat
-    if (this.flashUnit) this._drawFlash(state);
+    if (this.flashUnit)   this._drawFlash(state);
+    if (this._blastFlash) this._drawBlastFlash();
   }
 
   // ─── Tile ─────────────────────────────────────────────────
@@ -656,9 +657,35 @@ class Renderer {
     if (this.flashTimer <= 0) this.flashUnit = null;
   }
 
+  _drawBlastFlash() {
+    const bf = this._blastFlash;
+    if (!bf) return;
+    const ctx = this.ctx;
+    const T   = this.T;
+    const alpha = bf.timer / 25;
+    ctx.save();
+    // Expanding orange ring
+    const radius = (1 - alpha) * T * 1.8 + T * 0.3;
+    ctx.strokeStyle = `rgba(255,140,0,${alpha * 0.9})`;
+    ctx.fillStyle   = `rgba(255,80,0,${alpha * 0.35})`;
+    ctx.lineWidth   = 3;
+    ctx.beginPath();
+    ctx.arc(bf.tx * T + T / 2, bf.ty * T + T / 2, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    bf.timer--;
+    if (bf.timer <= 0) this._blastFlash = null;
+  }
+
   triggerFlash(unitId) {
     this.flashUnit  = unitId;
     this.flashTimer = 30;
+  }
+
+  // Trigger an orange explosion flash centred on tile (tx, ty)
+  triggerBlastFlash(tx, ty) {
+    this._blastFlash = { tx, ty, timer: 25 };
   }
 
   // ─── Move slide animation ─────────────────────────────────

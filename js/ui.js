@@ -662,10 +662,9 @@ const UI = {
     }
 
     if (this._abilityMode === 'blast') {
-      // Check if the clicked tile is in the blast highlight set
       const blastHL = this.renderer.blastHighlights || [];
       const inRange = blastHL.some(t => t.x === x && t.y === y);
-      if (inRange) {
+      if (inRange && activeUnit) {
         this._doBlast(activeUnit, x, y);
       } else {
         this._cancelAbilityMode();
@@ -860,7 +859,14 @@ const UI = {
     const state = this.engine;
     if (state.actionsLeft < 2) return;
     const results = state.resolveBlast(attacker, cx, cy);
+    // Flash the attacker and all units caught in the blast
     this.renderer.triggerFlash(attacker.id);
+    for (const r of results) {
+      const t = state.getUnit(r.target || (r.attacker !== attacker.id ? r.attacker : null));
+      if (t) this.renderer.triggerFlash(t.id);
+    }
+    // Brief tile flash on the target area
+    this.renderer.triggerBlastFlash(cx, cy);
     state.useAction(2);
     this._afterAction(attacker, {
       type: 'blast', unitId: attacker.id, x: cx, y: cy,
@@ -950,22 +956,19 @@ const UI = {
         break;
       }
       case 'blast': {
-        // Blast targets a TILE (not just a unit) within the grenadier's range.
-        // Highlight all tiles within range that have LOS — player clicks any
-        // of them to throw the grenade to that tile centre.
+        // Highlight tiles within range that have LOS — buildings block grenades.
         const blastTiles = [];
         for (let dy = -unit.range; dy <= unit.range; dy++) {
           for (let dx = -unit.range; dx <= unit.range; dx++) {
             const tx = unit.x + dx, ty = unit.y + dy;
             if (!state._inBounds(tx, ty)) continue;
-            const dist = Math.max(Math.abs(dx), Math.abs(dy));
-            if (dist > unit.range) continue;
+            if (Math.max(Math.abs(dx), Math.abs(dy)) > unit.range) continue;
             if (state.hasLOS(unit.x, unit.y, tx, ty)) blastTiles.push({ x: tx, y: ty });
           }
         }
         if (!blastTiles.length) { this.showNotif('No tiles in range!', 'warn'); return; }
         this._abilityMode = 'blast';
-        this.renderer.blastHighlights = blastTiles;   // tile coords, not unit IDs
+        this.renderer.blastHighlights = blastTiles;
         state.addLog(`💥 ${unit.name}: click a tile to throw grenade`, 'ability');
         this._updateAllPanels();
         break;
@@ -1488,7 +1491,10 @@ const UI = {
     addBtn('btnTakeCover',   'Take Cover', '🛡️', al >= 1, '+1 Defense until next activation');
     if (unit.ability) {
       const abilityLabels = { overwatch:'Overwatch', heal:'Heal', blast:'Grenade', stealth:'Stealth', command:'Command', sniper:'Overwatch' };
-      addBtn('btnAbility', abilityLabels[unit.ability] || 'Ability', '⚡', al >= 1 && !state.abilityUsed?.has(unit.id), 'Use specialist ability');
+      // blast and overwatch cost 2 actions; heal, stealth, command cost 1
+      const abilityCost = (unit.ability === 'blast' || unit.ability === 'overwatch') ? 2 : 1;
+      addBtn('btnAbility', abilityLabels[unit.ability] || 'Ability', '⚡',
+             al >= abilityCost && !state.abilityUsed?.has(unit.id), 'Use specialist ability');
     }
 
     // ── Objective action buttons ──
