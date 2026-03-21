@@ -12,6 +12,7 @@ class Renderer {
     // Highlight overlays
     this.moveHighlights   = []; // [{x,y}]
     this.attackHighlights = []; // unit ids
+    this.blastHighlights  = []; // [{x,y}] tile-based targeting for grenadier
     this.deployHighlights = []; // [{x,y}] valid drop tiles during deploy
     this.hoverTile        = null;
     this.selectedUnit     = null;
@@ -50,7 +51,8 @@ class Renderer {
     }
 
     // Draw move range
-    if (this.moveHighlights.length) this._drawMoveRange();
+    if (this.moveHighlights.length)  this._drawMoveRange();
+    if (this.blastHighlights.length)  this._drawBlastRange();
 
     // Draw buildings
     state.buildings.forEach(b => this._drawBuilding(state, b));
@@ -526,6 +528,22 @@ class Renderer {
   }
 
   // ─── Movement range ───────────────────────────────────────
+  _drawBlastRange() {
+    const ctx = this.ctx;
+    const T   = this.T;
+    ctx.save();
+    ctx.fillStyle   = 'rgba(255, 140, 0, 0.18)';
+    ctx.strokeStyle = 'rgba(255, 140, 0, 0.65)';
+    ctx.lineWidth   = 1.5;
+    ctx.setLineDash([3, 3]);
+    for (const { x, y } of this.blastHighlights) {
+      ctx.fillRect(x * T + 1, y * T + 1, T - 2, T - 2);
+      ctx.strokeRect(x * T + 1.5, y * T + 1.5, T - 3, T - 3);
+    }
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
   _drawMoveRange() {
     const ctx = this.ctx;
     const T   = this.T;

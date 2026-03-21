@@ -662,9 +662,10 @@ const UI = {
     }
 
     if (this._abilityMode === 'blast') {
-      // Grenadier blast target
-      const inRange = this.renderer.attackHighlights.includes(clickedUnit?.id);
-      if (inRange || this.engine.hasLOS(activeUnit.x, activeUnit.y, x, y)) {
+      // Check if the clicked tile is in the blast highlight set
+      const blastHL = this.renderer.blastHighlights || [];
+      const inRange = blastHL.some(t => t.x === x && t.y === y);
+      if (inRange) {
         this._doBlast(activeUnit, x, y);
       } else {
         this._cancelAbilityMode();
@@ -695,15 +696,24 @@ const UI = {
     }
 
     // Click on a DIFFERENT friendly unactivated unit → switch to it
+    // BUT: if that unit's tile is in the active unit's move range AND the active
+    // unit can still move, treat it as a move-to-tile instead — the player is
+    // trying to move there, not swap units.
     if (clickedUnit && clickedUnit.team === state.currentPlayer &&
         clickedUnit.alive && !state.activatedThisRound.has(clickedUnit.id)) {
-      this._deactivateSelected();
-      state.activateUnit(clickedUnit);
-      this.renderer.selectedUnit = clickedUnit;
-      this._showMoveRange(clickedUnit, false);
-      this._showAttackHighlights(clickedUnit);
-      this._updateAllPanels();
-      return;
+      const tileInMoveRange = this.renderer.moveHighlights.some(t => t.x === x && t.y === y);
+      const canStillMove    = state.actionsLeft >= 1 && !state.hasMoved && !state.hasSprinted;
+      if (tileInMoveRange && canStillMove) {
+        // Player wants to move to this tile, not switch units — fall through to move
+      } else {
+        this._deactivateSelected();
+        state.activateUnit(clickedUnit);
+        this.renderer.selectedUnit = clickedUnit;
+        this._showMoveRange(clickedUnit, false);
+        this._showAttackHighlights(clickedUnit);
+        this._updateAllPanels();
+        return;
+      }
     }
 
     // Click on enemy = shoot
@@ -774,7 +784,14 @@ const UI = {
       this._syncOnline({ type: 'end' });  // explicit end so remote advances turn
     } else {
       // Unit still has actions — refresh highlights for remaining moves/shots.
-      this._showMoveRange(unit, false);
+      // Only show move range if the unit hasn't moved yet (hasMoved=false).
+      // Showing stale move highlights after a move causes the canvas click handler
+      // to misinterpret clicks-on-occupied-tiles as move attempts.
+      if (!state.hasMoved && !state.hasSprinted) {
+        this._showMoveRange(unit, false);
+      } else {
+        this.renderer.moveHighlights = [];   // can't move again — clear highlights
+      }
       this._showAttackHighlights(unit);
       if (syncPayload) this._syncOnline(syncPayload);
     }
@@ -787,6 +804,7 @@ const UI = {
     this.renderer.selectedUnit     = null;
     this.renderer.moveHighlights   = [];
     this.renderer.attackHighlights = [];
+    this.renderer.blastHighlights  = [];
     this.renderer.healTargets      = [];
     this._abilityMode              = null;
   },
@@ -863,6 +881,7 @@ const UI = {
     this._abilityMode = null;
     this.renderer.healTargets      = [];
     this.renderer.attackHighlights = [];
+    this.renderer.blastHighlights  = [];
     const unit = this.engine.getActiveUnit();
     if (unit) {
       this._showMoveRange(unit, false);
@@ -931,12 +950,23 @@ const UI = {
         break;
       }
       case 'blast': {
-        // Blast just enters targeting mode — useAction is called in _doBlast.
-        const targets = state.getValidTargets(unit);
-        if (!targets.length) { this.showNotif('No targets in range!', 'warn'); return; }
+        // Blast targets a TILE (not just a unit) within the grenadier's range.
+        // Highlight all tiles within range that have LOS — player clicks any
+        // of them to throw the grenade to that tile centre.
+        const blastTiles = [];
+        for (let dy = -unit.range; dy <= unit.range; dy++) {
+          for (let dx = -unit.range; dx <= unit.range; dx++) {
+            const tx = unit.x + dx, ty = unit.y + dy;
+            if (!state._inBounds(tx, ty)) continue;
+            const dist = Math.max(Math.abs(dx), Math.abs(dy));
+            if (dist > unit.range) continue;
+            if (state.hasLOS(unit.x, unit.y, tx, ty)) blastTiles.push({ x: tx, y: ty });
+          }
+        }
+        if (!blastTiles.length) { this.showNotif('No tiles in range!', 'warn'); return; }
         this._abilityMode = 'blast';
-        this.renderer.attackHighlights = targets.map(t => t.id);
-        state.addLog(`💥 ${unit.name}: click an enemy to throw grenade`, 'ability');
+        this.renderer.blastHighlights = blastTiles;   // tile coords, not unit IDs
+        state.addLog(`💥 ${unit.name}: click a tile to throw grenade`, 'ability');
         this._updateAllPanels();
         break;
       }
@@ -1055,6 +1085,20 @@ const UI = {
         }
         break;
       }
+      case 'ability': {
+        // AI uses type:'ability' for grenadier blast and medic heal
+        if (!state.getActiveUnit()) state.activateUnit(unit);
+        if (!unit) break;
+        if (unit.ability === 'blast' && action.x !== undefined) {
+          const results = state.resolveBlast(unit, action.x, action.y);
+          this._showDiceResult(results[0]);
+          state.useAction(2);
+        } else if (unit.ability === 'heal' && action.targetId) {
+          const healTarget = state.getUnit(action.targetId);
+          if (healTarget) { state.tryHeal(unit, healTarget); state.useAction(1); }
+        }
+        break;
+      }
       case 'heal': {
         if (!state.getActiveUnit()) state.activateUnit(unit);
         const healTarget = state.getUnit(action.targetId);
@@ -1070,14 +1114,9 @@ const UI = {
         if (unit) { unit.inCover = true; state.addLog(`🛡️ ${unit.name} takes cover!`, 'ability'); state.useAction(1); }
         break;
       case 'end':
-        // Ensure the unit is activated before ending, otherwise endActivation()
-        // returns early (activeUnit===null) and the unit is never added to
-        // activatedThisRound, causing the AI to re-schedule itself forever.
         if (!state.getActiveUnit() && unit) state.activateUnit(unit);
         state.endActivation();
-        this.renderer.selectedUnit = null;
-        this.renderer.moveHighlights = [];
-        this.renderer.attackHighlights = [];
+        this._clearActionVisuals();
         break;
     }
 
