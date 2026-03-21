@@ -397,6 +397,14 @@ class Renderer {
     ctx.fillText(unit.name.substring(0, 3).toUpperCase(), cx, cy + 24);
     ctx.shadowBlur = 0;
 
+    // Bomb carrier indicator
+    if (state.gameMode === 'bomb' && state.objectives?.bomb?.carriedBy === unit.id) {
+      ctx.font = '11px serif'; ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+      ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
+      ctx.fillText('💣', cx + 10, cy - 10);
+      ctx.shadowBlur = 0; ctx.textBaseline = 'alphabetic';
+    }
+
     // Speed lines — short strokes behind the unit in its current travel direction
     const anim = this._moveAnims[unit.id];
     if (anim) {
@@ -838,6 +846,29 @@ class Renderer {
       ctx.fillText(carrier ? '🚩 CARRIED' : '🚩 FLAG', cx, cy + 22);
       ctx.shadowBlur = 0;
       ctx.restore();
+    }
+
+    // ── Physical bomb (before it's planted) ──
+    if (state.gameMode === 'bomb' && obj.bomb && !obj.bombPlanted) {
+      const b = obj.bomb;
+      if (b.carriedBy === null && this._inBoundsR(b.x, b.y)) {
+        const cx = b.x * T + T / 2;
+        const cy = b.y * T + T / 2;
+        const pulse = Math.sin(this.animFrame * 0.1) * 0.4 + 0.6;
+        ctx.save();
+        ctx.fillStyle   = `rgba(255,180,0,${0.15 + pulse * 0.1})`;
+        ctx.strokeStyle = `rgba(255,180,0,${pulse})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(cx, cy, T * 0.42, 0, Math.PI * 2);
+        ctx.fill(); ctx.stroke();
+        ctx.font = `${Math.round(T * 0.38)}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('💣', cx, cy);
+        ctx.font = 'bold 7px monospace'; ctx.textBaseline = 'alphabetic';
+        ctx.fillStyle = '#ffcc00'; ctx.shadowColor = '#000'; ctx.shadowBlur = 3;
+        ctx.fillText('PICK UP', cx, cy + 20);
+        ctx.shadowBlur = 0;
+        ctx.restore();
+      }
     }
 
     // ── Bomb sites ──

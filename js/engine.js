@@ -362,6 +362,20 @@ class Engine {
       this.updateFlagPosition(unit);
       this.tryScoreFlag(unit);
     }
+    // VIP extraction: Alpha wins if VIP reaches the extraction tile
+    if (this.gameMode === 'vip' && unit.isVIP) {
+      const obj = this.objectives;
+      if (unit.x === obj.extractX && unit.y === obj.extractY) {
+        this.addLog(`👑 ${unit.name} reaches the extraction point! Alpha wins!`, 'system');
+        this.phase  = 'gameover';
+        this.winner = 0;
+      }
+    }
+    // Bomb carrier move: update bomb position with carrier
+    if (this.gameMode === 'bomb' && this.objectives?.bomb?.carriedBy === unit.id) {
+      this.objectives.bomb.x = unit.x;
+      this.objectives.bomb.y = unit.y;
+    }
   }
 
   // ─── Line of Sight ────────────────────────────────────────
@@ -477,8 +491,9 @@ class Engine {
         target.alive = false;
         target.hp = 0;
         this.addLog(`💀 ${target.name} is eliminated!`, 'death');
-        // Drop flag if carrier was killed
-        if (this.gameMode === 'ctf') this.dropFlag(target.id);
+        // Drop flag/bomb if carrier was killed
+        if (this.gameMode === 'ctf')  this.dropFlag(target.id);
+        if (this.gameMode === 'bomb') this.dropBomb(target.id);
         this.checkObjectiveWin();
       } else {
         target.suppressed = true;
@@ -664,20 +679,25 @@ class Engine {
       this.addLog('🚩 Capture the Flag — grab the flag at centre and return it to your base!', 'system');
 
     } else if (this.gameMode === 'bomb') {
-      // Two bomb sites, roughly 1/3 and 2/3 across
+      // Two bomb sites on opposite sides of the map
       const site1 = this._nearestOpen(Math.floor(COLS * 0.35), Math.floor(ROWS * 0.3));
       const site2 = this._nearestOpen(Math.floor(COLS * 0.65), Math.floor(ROWS * 0.7));
+      // The bomb starts at centre — Attackers must pick it up and carry it to a site
+      const bombStart = this._nearestOpen(cx, cy);
+      const fuseLen = (this.bombFuseLength && this.bombFuseLength >= 1) ? this.bombFuseLength : 8;
       this.objectives = {
         sites: [
-          { id: 0, x: site1.x, y: site1.y, planted: false, defused: false, plantedBy: null, timer: 0 },
-          { id: 1, x: site2.x, y: site2.y, planted: false, defused: false, plantedBy: null, timer: 0 },
+          { id: 0, x: site1.x, y: site1.y, planted: false, defused: false },
+          { id: 1, x: site2.x, y: site2.y, planted: false, defused: false },
         ],
+        // Physical bomb object — starts at centre, must be carried to a site
+        bomb: { x: bombStart.x, y: bombStart.y, carriedBy: null },
         bombPlanted: false,
-        bombTimer: 0,
-        maxTimer: 8,  // rounds until explosion
-        activeSite: null,
+        bombTimer:   0,
+        maxTimer:    fuseLen,
+        activeSite:  null,
       };
-      this.addLog('💣 Plant the Bomb — Attackers plant at a site. Defenders have 8 rounds to defuse!', 'system');
+      this.addLog(`💣 Plant the Bomb — Attackers: pick up the bomb and carry it to a site. Defenders have ${fuseLen} rounds to defuse!`, 'system');
 
     } else if (this.gameMode === 'vip') {
       // VIP is designated during _beginBattle once units exist
@@ -747,18 +767,41 @@ class Engine {
     obj.flag.y = unit.y;
   }
 
-  // Bomb: plant
+  // Bomb: pick up (attacker must carry it to a site before planting)
+  tryPickupBomb(unit) {
+    const obj = this.objectives;
+    if (!obj.bomb || unit.team !== 0) return false;          // only attackers
+    if (obj.bomb.carriedBy !== null) return false;            // already carried
+    if (obj.bombPlanted) return false;                        // already planted
+    if (unit.x !== obj.bomb.x || unit.y !== obj.bomb.y) return false;
+    obj.bomb.carriedBy = unit.id;
+    this.addLog(`💣 ${unit.name} picks up the bomb!`, 'ability');
+    return true;
+  }
+
+  // Drop bomb on current tile (e.g. when carrier is killed)
+  dropBomb(unitId) {
+    const obj = this.objectives;
+    if (!obj.bomb || obj.bomb.carriedBy !== unitId) return;
+    const carrier = this.getUnit(unitId);
+    if (carrier) { obj.bomb.x = carrier.x; obj.bomb.y = carrier.y; }
+    obj.bomb.carriedBy = null;
+    this.addLog(`💣 The bomb was dropped!`, 'system');
+  }
+
+  // Bomb: plant at a site (carrier must be standing on a site tile)
   tryPlantBomb(unit) {
     const obj = this.objectives;
-    if (!obj.sites || unit.team !== 0) return false; // only attackers plant
+    if (!obj.sites || unit.team !== 0) return false;
     if (obj.bombPlanted) return false;
+    if (!obj.bomb || obj.bomb.carriedBy !== unit.id) return false; // must be carrying
     const site = obj.sites.find(s => s.x === unit.x && s.y === unit.y && !s.planted);
     if (!site) return false;
-    site.planted   = true;
-    site.plantedBy = unit.id;
+    site.planted    = true;
     obj.bombPlanted = true;
     obj.activeSite  = site.id;
     obj.bombTimer   = obj.maxTimer;
+    obj.bomb.carriedBy = null;  // bomb is now planted (no longer carried)
     this.addLog(`💣 ${unit.name} plants the bomb at Site ${site.id + 1}! Defenders have ${obj.maxTimer} rounds!`, 'ability');
     return true;
   }
@@ -827,10 +870,14 @@ class Engine {
     if (!p0alive) return 1;
     if (!p1alive) return 0;
 
-    // VIP mode: Bravo also wins if they kill the VIP (even while others live)
+    // VIP mode: Bravo wins if VIP is killed; Alpha wins if VIP reaches extraction
     if (this.gameMode === 'vip' && this.objectives?.vipId) {
       const vip = this.getUnit(this.objectives.vipId);
       if (vip && !vip.alive) return 1;
+      if (vip && vip.alive &&
+          vip.x === this.objectives.extractX && vip.y === this.objectives.extractY) {
+        return 0;
+      }
     }
 
     return null;

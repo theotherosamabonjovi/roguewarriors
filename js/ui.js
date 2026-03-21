@@ -225,6 +225,16 @@ const UI = {
     document.querySelectorAll('.gamemode-btn').forEach(b => b.classList.remove('active'));
     const btn = document.querySelector(`[data-gamemode="${gm}"]`);
     if (btn) btn.classList.add('active');
+    // Show fuse-length control only in bomb mode
+    const fuseCtrl = document.getElementById('fuse-control');
+    if (fuseCtrl) fuseCtrl.style.display = (gm === 'bomb') ? 'block' : 'none';
+  },
+
+  setBombFuse(n) {
+    this.bombFuseLength = n;
+    document.querySelectorAll('[data-fuse]').forEach(b => b.classList.remove('active'));
+    const btn = document.querySelector(`[data-fuse="${n}"]`);
+    if (btn) btn.classList.add('active');
   },
 
   // ─── Map editor ─────────────────────────────────────────
@@ -360,8 +370,9 @@ const UI = {
 
     eng.players[0].squadDef = this.armyDraft[0];
     eng.players[1].squadDef = this.armyDraft[1];
-    eng.mode     = this.mode;
-    eng.gameMode = this.gameMode || 'elimination';
+    eng.mode           = this.mode;
+    eng.gameMode       = this.gameMode || 'elimination';
+    eng.bombFuseLength = this.bombFuseLength || 8;
 
     this.engine   = eng;
     this.renderer = new Renderer('battlefield');
@@ -371,35 +382,33 @@ const UI = {
     this._setupGameCanvas();
     this.startRenderLoop();
 
-    // Wire multiplayer callbacks now that the engine exists
-    // Note: _setupMultiplayerCallbacks() is called in hostGame/joinGame's
-    // onConnect handler so it is wired before the army-builder squad messages
-    // fly, not here where it would be too late.
-
-    // Tell the renderer which team is local so it can hide the opponent's
-    // deploy positions until the battle starts.
     if (this.mode === 'online') {
       this.renderer._onlineMyTeam = this.myTeam;
-    }
 
-    // Start interactive deployment
-    eng.startDeploy();
-    this._enterDeployPhase();
-
-    // Synchronise engines over the network.
-    // Both sides send a message so whichever player clicks "Deploy & Fight"
-    // second will always get/send the authoritative state:
-    //   Host  : sends 'init' immediately AND handles 'requestInit' replies.
-    //   Joiner: sends 'requestInit' so the host re-sends if host was first.
-    // This covers both orderings without a race.
-    if (this.mode === 'online') {
       if (this.mp?.isHost) {
-        // Host proactively pushes their engine to whoever is already listening
+        // HOST: generate the authoritative engine, start deploy, then broadcast.
+        // The joiner will receive 'init' and sync from it.
+        eng.startDeploy();
+        this._enterDeployPhase();
         this._syncOnline({ type: 'init', state: eng.serialize() });
       } else {
-        // Joiner asks for the host's engine in case the host isn't ready yet
+        // JOINER: do NOT call startDeploy or enterDeployPhase yet.
+        // Show a waiting banner, then start deploy only after 'init' arrives.
+        const banner = document.getElementById('turn-banner');
+        if (banner) {
+          banner.textContent = '⏳ Waiting for host map…';
+          banner.className   = 'turn-banner';
+        }
+        document.getElementById('deploy-section').style.display  = 'none';
+        document.getElementById('actions-section').style.display = 'none';
+        document.getElementById('stats-section').style.display   = 'none';
+        // Ask host to send init (covers case where host sent it before joiner was ready)
         this._syncOnline({ type: 'requestInit' });
       }
+    } else {
+      // AI / local: start deploy immediately
+      eng.startDeploy();
+      this._enterDeployPhase();
     }
   },
 
@@ -554,12 +563,11 @@ const UI = {
     const state = this.engine;
     this._localDeployDone  = false;
     this._remoteDeployDone = false;
-    // Ensure the engine is in playing state — call _beginBattle directly
-    // since both squads are placed and we're bypassing the sequential deploy.
+    // Call _beginBattle directly — all units are already placed via deployDone
+    // exchange. Both clients run this independently so both end up with
+    // identical state: phase='playing', currentPlayer=0, activatedThisRound={}.
     if (state.phase !== 'playing') {
-      // Force both teams' deployingTeam flags done then start battle
-      state.deployingTeam = 0; state.finishTeamDeploy(); // → deployingTeam=1
-      state.finishTeamDeploy(); // → _beginBattle
+      state._beginBattle();
     }
     this._exitDeployPhase();
   },
@@ -1062,6 +1070,10 @@ const UI = {
         if (unit) { unit.inCover = true; state.addLog(`🛡️ ${unit.name} takes cover!`, 'ability'); state.useAction(1); }
         break;
       case 'end':
+        // Ensure the unit is activated before ending, otherwise endActivation()
+        // returns early (activeUnit===null) and the unit is never added to
+        // activatedThisRound, causing the AI to re-schedule itself forever.
+        if (!state.getActiveUnit() && unit) state.activateUnit(unit);
         state.endActivation();
         this.renderer.selectedUnit = null;
         this.renderer.moveHighlights = [];
@@ -1126,7 +1138,12 @@ const UI = {
     // share the exact same board, squads, game-mode, and deploy state.
     if (action.type === 'init') {
       if (!state) return;
+      // Restore host's board, squads, and settings
       state.deserialize(action.state);
+      // Re-run startDeploy so units are created fresh from the now-correct
+      // squadDefs on the shared board.  This is safe to call multiple times —
+      // it simply resets units[] and phase.
+      state.startDeploy();
       this._enterDeployPhase();
       this._updateAllPanels();
       return;
@@ -1151,19 +1168,23 @@ const UI = {
       return;
     }
 
-    // ── FIX #7: Gate every action behind the same legality checks used locally ──
+    // ── Turn-order gate ──────────────────────────────────────────────────────
 
-    // 1. Must be remote team's turn
-    if (state.currentPlayer !== remTeam) return;
-
-    // 2. 'end' doesn't need a unit
+    // 'end' is handled BEFORE the currentPlayer guard because the joiner's
+    // useAction may have already triggered endActivation internally (switching
+    // currentPlayer away from remTeam).  The 'end' message arriving afterwards
+    // is harmless — endActivation returns early if activeUnit is null — but we
+    // must not drop it, otherwise the two engines can diverge on currentPlayer.
     if (action.type === 'end') {
-      state.endActivation();
-      this._clearActionVisuals();   // wipe stale highlights so local player sees a clean board
+      state.endActivation();        // no-op if already ended; safe to call twice
+      this._clearActionVisuals();
       this._updateAllPanels();
       if (state.phase === 'gameover') this._showGameOver();
       return;
     }
+
+    // All other actions require it to be the remote player's turn
+    if (state.currentPlayer !== remTeam) return;
 
     // 3. Unit must exist, be alive, and belong to the remote team
     const unit = state.getUnit(action.unitId);
@@ -1427,15 +1448,22 @@ const UI = {
         addBtn('btnPickupFlag', 'Pick Up Flag', '🚩', al >= 1, 'Pick up the flag and carry it to your base');
       }
     }
-    if (state.gameMode === 'bomb' && state.objectives?.sites) {
-      // Plant bomb (attackers = team 0, on a site tile)
-      if (unit.team === 0 && !state.objectives.bombPlanted) {
-        const onSite = state.objectives.sites.some(s => s.x === unit.x && s.y === unit.y && !s.planted);
+    if (state.gameMode === 'bomb' && state.objectives) {
+      const obj = state.objectives;
+      // Attacker: pick up bomb if standing on it and not already carrying
+      if (unit.team === 0 && obj.bomb && !obj.bombPlanted &&
+          obj.bomb.carriedBy === null &&
+          unit.x === obj.bomb.x && unit.y === obj.bomb.y) {
+        addBtn('btnPickupBomb', 'Pick Up Bomb', '💣', al >= 1, 'Pick up the bomb and carry it to a site');
+      }
+      // Attacker carrying bomb: plant at site
+      if (unit.team === 0 && obj.bomb?.carriedBy === unit.id && !obj.bombPlanted) {
+        const onSite = obj.sites?.some(s => s.x === unit.x && s.y === unit.y && !s.planted);
         if (onSite) addBtn('btnPlantBomb', 'Plant Bomb', '💣', al >= 1, 'Plant the bomb at this site');
       }
-      // Defuse bomb (defenders = team 1, on planted site)
-      if (unit.team === 1 && state.objectives.bombPlanted) {
-        const activeSite = state.objectives.sites.find(s => s.id === state.objectives.activeSite);
+      // Defender: defuse planted bomb on active site
+      if (unit.team === 1 && obj.bombPlanted) {
+        const activeSite = obj.sites?.find(s => s.id === obj.activeSite);
         if (activeSite && unit.x === activeSite.x && unit.y === activeSite.y) {
           addBtn('btnDefuseBomb', 'Defuse Bomb', '🔧', al >= 2, 'Defuse the bomb — takes 2 actions');
         }
@@ -1473,6 +1501,17 @@ const UI = {
       this._updateAllPanels();
       this._checkAITurn();
       if (state.phase === 'gameover') this._showGameOver();
+    }
+  },
+
+  btnPickupBomb() {
+    const state = this.engine;
+    const unit  = state.getActiveUnit();
+    if (!unit || state.actionsLeft < 1) return;
+    if (state.tryPickupBomb(unit)) {
+      state.useAction(1);
+      this._updateAllPanels();
+      this._checkAITurn();
     }
   },
 
