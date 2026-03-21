@@ -1147,6 +1147,11 @@ const UI = {
     const state   = this.engine;
     const remTeam = this.mp.isHost ? 1 : 0;  // remote player's team
 
+    // Guard: if the engine isn't initialised yet, only allow pre-game messages.
+    // Without this, an unexpected 'end' or action arriving before startGame()
+    // would call state.endActivation() on a null object and crash the page.
+    if (!state && !['squadReady','requestInit','init'].includes(action.type)) return;
+
     // ── Pre-game messages — handled before any turn-order checks ─────────────
 
     // 'init': host sends their full serialized engine right after startGame().
@@ -1220,10 +1225,12 @@ const UI = {
     // is harmless — endActivation returns early if activeUnit is null — but we
     // must not drop it, otherwise the two engines can diverge on currentPlayer.
     if (action.type === 'end') {
-      state.endActivation();        // no-op if already ended; safe to call twice
-      this._clearActionVisuals();
-      this._updateAllPanels();
-      if (state.phase === 'gameover') this._showGameOver();
+      if (state) {
+        state.endActivation();      // no-op if already ended; safe to call twice
+        this._clearActionVisuals();
+        this._updateAllPanels();
+        if (state.phase === 'gameover') this._showGameOver();
+      }
       return;
     }
 
