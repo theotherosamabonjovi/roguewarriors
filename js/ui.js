@@ -1809,13 +1809,6 @@ const UI = {
   },
 
   hostGame() {
-    // Guard: if we're already hosting and waiting, don't restart — just
-    // make sure the code is visible. A second click would abandon the peer
-    // the joiner is trying to connect to and generate a useless new code.
-    if (this.mp?.isHost && !this.mp?.connected) {
-      document.getElementById('room-code-display').style.display = 'block';
-      return;
-    }
     this.initMultiplayer();
     this.myTeam = 0;
     this.mp.host(

@@ -14,12 +14,12 @@ class MultiplayerManager {
     this.onDisconnect = null;
   }
 
-  // PeerJS 1.5.x: passing `undefined` as the first argument is NOT the same
-  // as omitting it — the signaling server may treat it as a literal peer ID of
-  // "undefined" and reject/ignore it, causing `open` to never fire.
-  // Always call new Peer() with NO positional arguments to get a random ID.
+  // Create a PeerJS peer with an auto-generated ID.
+  // We call new Peer() with no arguments — the safest form across all 1.x versions.
+  // Passing objects or undefined as the first argument has inconsistent behaviour
+  // across PeerJS versions and signaling server implementations.
   _makePeer() {
-    return new Peer({ debug: 0 });
+    return new Peer();
   }
 
   // Host a game — calls onCode(roomCode) once the signaling server assigns an
