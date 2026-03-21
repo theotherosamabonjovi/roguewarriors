@@ -71,21 +71,33 @@ class MultiplayerManager {
     this.peer.on('open', () => {
       clearTimeout(joinTimeout);
       this.conn = this.peer.connect(code, { reliable: true });
-      this._setupConn(this.conn, onConnect);
+
+      // Second timeout: peer reached the signaling server but the P2P
+      // DataChannel may never open (wrong code, host gone, NAT failure).
+      // Without this the joiner hangs on "Connecting…" forever.
+      const connTimeout = setTimeout(() => {
+        if (!this.connected) {
+          const statusEl = document.getElementById('lobby-status');
+          if (statusEl) statusEl.textContent = '❌ Could not reach host — check the room code and try again.';
+          UI.showNotif('Could not connect to host', 'error');
+        }
+      }, 10000);
+
+      this._setupConn(this.conn, onConnect, connTimeout);
     });
 
     this.peer.on('error', (err) => {
       console.error('PeerJS join error:', err);
       const statusEl = document.getElementById('lobby-status');
       if (statusEl) statusEl.textContent = '❌ Could not connect — check the room code and try again.';
-      // FIX #10: Never reflect raw user input directly into UI strings.
       const safeCode = String(code).replace(/[^a-zA-Z0-9-]/g, '').slice(0, 32);
       UI.showNotif('Could not connect to room: ' + safeCode, 'error');
     });
   }
 
-  _setupConn(conn, onConnect) {
+  _setupConn(conn, onConnect, connTimeout) {
     conn.on('open', () => {
+      if (connTimeout) clearTimeout(connTimeout);
       this.connected = true;
       if (onConnect) onConnect();
     });
@@ -102,6 +114,8 @@ class MultiplayerManager {
 
     conn.on('error', (err) => {
       console.error('Connection error:', err);
+      const statusEl = document.getElementById('lobby-status');
+      if (statusEl) statusEl.textContent = '❌ Connection error — check the room code and try again.';
     });
   }
 
