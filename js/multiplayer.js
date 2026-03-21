@@ -14,12 +14,31 @@ class MultiplayerManager {
     this.onDisconnect = null;
   }
 
-  // Host a game — returns room code via callback
+  // PeerJS 1.5.x: passing `undefined` as the first argument is NOT the same
+  // as omitting it — the signaling server may treat it as a literal peer ID of
+  // "undefined" and reject/ignore it, causing `open` to never fire.
+  // Always call new Peer() with NO positional arguments to get a random ID.
+  _makePeer() {
+    return new Peer({ debug: 0 });
+  }
+
+  // Host a game — calls onCode(roomCode) once the signaling server assigns an
+  // ID, then calls onConnect() when the joiner's connection opens.
   host(onCode, onConnect) {
     this.isHost = true;
-    this.peer   = new Peer(undefined, { debug: 0 });
+    this.peer   = this._makePeer();
+
+    // If the signaling server doesn't respond within 10 s, surface an error
+    // instead of leaving the user staring at a blank lobby.
+    const hostTimeout = setTimeout(() => {
+      if (!this.roomCode) {
+        const statusEl = document.getElementById('lobby-status');
+        if (statusEl) statusEl.textContent = '❌ Timed out — signaling server unreachable. Try again.';
+      }
+    }, 10000);
 
     this.peer.on('open', (id) => {
+      clearTimeout(hostTimeout);
       this.roomCode = id;
       if (onCode) onCode(id);
     });
@@ -31,6 +50,8 @@ class MultiplayerManager {
 
     this.peer.on('error', (err) => {
       console.error('PeerJS host error:', err);
+      const statusEl = document.getElementById('lobby-status');
+      if (statusEl) statusEl.textContent = '❌ Could not create room — check your connection and try again.';
       UI.showNotif('Connection error: ' + err.type, 'error');
     });
   }
@@ -38,17 +59,26 @@ class MultiplayerManager {
   // Join a game by room code
   join(code, onConnect) {
     this.isHost = false;
-    this.peer   = new Peer(undefined, { debug: 0 });
+    this.peer   = this._makePeer();
+
+    const joinTimeout = setTimeout(() => {
+      if (!this.connected) {
+        const statusEl = document.getElementById('lobby-status');
+        if (statusEl) statusEl.textContent = '❌ Timed out — could not reach signaling server. Try again.';
+      }
+    }, 10000);
 
     this.peer.on('open', () => {
+      clearTimeout(joinTimeout);
       this.conn = this.peer.connect(code, { reliable: true });
       this._setupConn(this.conn, onConnect);
     });
 
     this.peer.on('error', (err) => {
       console.error('PeerJS join error:', err);
+      const statusEl = document.getElementById('lobby-status');
+      if (statusEl) statusEl.textContent = '❌ Could not connect — check the room code and try again.';
       // FIX #10: Never reflect raw user input directly into UI strings.
-      // Truncate and strip non-alphanumeric chars from the code before display.
       const safeCode = String(code).replace(/[^a-zA-Z0-9-]/g, '').slice(0, 32);
       UI.showNotif('Could not connect to room: ' + safeCode, 'error');
     });
