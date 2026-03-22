@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rogue Warriors Digital</title>
+  <link rel="stylesheet" href="css/game.css">
+</head>
+<body>
+
+<!-- ─── Global notification toast ────────────────────────────── -->
+<div id="notif" class="notif"></div>
+
+<!-- ─── Tooltip ──────────────────────────────────────────────── -->
+<div id="tooltip"></div>
+
+<!-- ────────────────────────────────────────────────────────────
+     SCREEN: MAIN MENU
+──────────────────────────────────────────────────────────────── -->
+<div id="screen-menu" class="screen active">
+  <div class="menu-container">
+    <div class="logo">
+      <h1>⚔ Rogue Warriors</h1>
+      <p class="subtitle">Modern Tactical Skirmish — Digital Edition</p>
+    </div>
+    <div class="menu-buttons">
+      <button class="btn-primary" onclick="UI.startMode('ai')">⚔️ &nbsp;vs AI Opponent</button>
+      <button class="btn-primary" onclick="UI.startMode('local')">🎯 &nbsp;Local 2-Player</button>
+      <button class="btn-primary" onclick="UI.startMode('online')">🌐 &nbsp;Online Multiplayer</button>
+      <button class="btn-secondary" onclick="UI.showHowToPlay()">📖 &nbsp;How to Play</button>
+    </div>
+    <p style="color:var(--text2); font-size:12px; margin-top:8px;">
+      Based on <em>Rogue Warriors: A Modern Warfare Skirmish Game</em>
+    </p>
+  </div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────
+     SCREEN: HOW TO PLAY
+──────────────────────────────────────────────────────────────── -->
+<div id="screen-howtoplay" class="screen">
+  <div class="rules-container" style="padding-top:40px; max-height:100vh; overflow:auto;">
+    <div style="display:flex; align-items:center; gap:16px;">
+      <button class="btn-back" onclick="UI.showScreen('screen-menu')">← Back</button>
+      <h2>📖 How to Play</h2>
+    </div>
+    <div class="rules-content">
+      <div class="rules-section">
+        <h3>🎯 Objective</h3>
+        <p>Eliminate all enemy units. Each player commands a Fire Team of 4–8 specialists across a tactical battlefield. Last team standing wins.</p>
+      </div>
+      <div class="rules-section">
+        <h3>⚡ Turn Structure — Alternate Activations</h3>
+        <ul>
+          <li>Players alternate activating one unit at a time.</li>
+          <li>Each activated unit gets <strong>2 Actions</strong>.</li>
+          <li>Once all units have been activated, a new Round begins.</li>
+          <li>Round start: suppression clears, overwatch resets.</li>
+        </ul>
+      </div>
+      <div class="rules-section">
+        <h3>👣 Actions</h3>
+        <ul>
+          <li><strong>Move (1 action):</strong> Move up to your Move value in tiles. Click a blue tile.</li>
+          <li><strong>Sprint (2 actions):</strong> Move up to 2× your Move value. Cannot shoot this activation.</li>
+          <li><strong>Shoot (1 action):</strong> Fire at an enemy in range &amp; line of sight. Click a red enemy.</li>
+          <li><strong>Aim (1 action):</strong> +1 to hit on your next Shoot this activation.</li>
+          <li><strong>Take Cover (1 action):</strong> Gain +1 Defense until your next activation.</li>
+          <li><strong>Charge (2 actions):</strong> Melee attack on an adjacent enemy.</li>
+          <li><strong>Ability (1–2 actions):</strong> Use your unit's specialist ability.</li>
+        </ul>
+      </div>
+      <div class="rules-section">
+        <h3>🎲 Combat — Shooting</h3>
+        <ul>
+          <li>Roll attack dice (1d6 per die shown). Hit on your <strong>Shoot Skill</strong> or higher.</li>
+          <li><strong>Short range</strong>: no penalty. <strong>Medium</strong>: +1 to target. <strong>Long</strong>: +2 to target.</li>
+          <li>Each hit: defender rolls 1d6 vs their <strong>Defense</strong> value. Equal or higher = saved.</li>
+          <li>Failed save = wound (unit eliminated). Near-miss = suppression (−1 to next roll).</li>
+          <li><strong>Cover</strong>: +1 to Defense saves (tile &amp; active cover stacks, max +2).</li>
+        </ul>
+      </div>
+      <div class="rules-section">
+        <h3>🦸 Specialists</h3>
+        <ul>
+          <li><strong>Rifleman:</strong> Balanced all-rounder. 1 attack die.</li>
+          <li><strong>Sniper:</strong> Long range, high accuracy, <em>Overwatch</em> — watch a zone for 2 turns.</li>
+          <li><strong>Medic:</strong> Can <em>Heal</em> one adjacent ally per game (remove suppression or revive).</li>
+          <li><strong>Grenadier:</strong> 2 attack dice, short range, <em>Blast</em> hits target + adjacent tiles.</li>
+          <li><strong>Leader:</strong> <em>Command Aura</em> — allies within 3 tiles may reroll one failed die per attack.</li>
+          <li><strong>Scout:</strong> Fast (Move 6), <em>Stealth</em> — enemies need 6+ to wound while in cover.</li>
+        </ul>
+      </div>
+      <div class="rules-section">
+        <h3>🌐 Multiplayer</h3>
+        <p>Use <strong>Online Multiplayer</strong> to play with friends. Player 1 hosts and shares their Room Code. Player 2 enters it to connect. No account needed — peer-to-peer via the browser.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────
+     SCREEN: ARMY BUILDER
+──────────────────────────────────────────────────────────────── -->
+<div id="screen-army" class="screen">
+  <input type="hidden" id="army-current-player" value="0">
+  <div class="army-container" style="padding: 20px 0; max-height:100vh; overflow:auto; width:min(920px,96%); margin:auto;">
+    <div class="army-header">
+      <div>
+        <h2 id="army-player-title">🔵 Alpha Team — Build Your Squad</h2>
+        <p style="font-size:12px; color:var(--text2); margin-top:4px;">
+          Min 4 units · Max 8 units · Must include 1 Leader
+        </p>
+      </div>
+      <div class="budget-display">
+        Points remaining: <strong id="army-budget-left">10</strong> / 10
+      </div>
+    </div>
+
+    <!-- Current squad -->
+    <div class="panel-title">YOUR SQUAD</div>
+    <div id="army-squad-list"></div>
+
+    <!-- Unit catalogue -->
+    <div class="panel-title" style="margin-top:12px;">UNIT CATALOGUE — Click to add</div>
+    <div class="unit-catalogue" id="unit-catalogue"></div>
+
+    <!-- Actions -->
+    <div class="army-actions" style="margin-top:12px;">
+      <button class="btn btn-ghost" onclick="UI.showScreen('screen-menu')">← Back</button>
+      <button class="btn btn-green" onclick="UI.confirmArmy(parseInt(document.getElementById('army-current-player').value))">
+        Confirm Squad →
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────
+     SCREEN: BATTLEFIELD SETUP
+──────────────────────────────────────────────────────────────── -->
+<div id="screen-battlefield" class="screen" style="justify-content:center; align-items:center; padding:20px;">
+  <div style="display:flex; flex-direction:column; gap:16px; width:min(860px,96%); max-height:100vh; overflow:auto; padding:8px 0;">
+    <h2>🗺️ Battlefield Setup</h2>
+
+    <div class="battlefield-container">
+      <!-- Controls -->
+      <div class="bf-controls">
+
+        <div class="control-group">
+          <div class="control-label">Game Mode</div>
+          <div class="btn-group" style="flex-wrap:wrap;">
+            <button class="gamemode-btn active" data-gamemode="elimination" onclick="UI.setGameMode('elimination')" title="Eliminate all enemies">💀 Elimination</button>
+            <button class="gamemode-btn" data-gamemode="ctf"       onclick="UI.setGameMode('ctf')"       title="Capture the flag">🚩 Capture the Flag</button>
+            <button class="gamemode-btn" data-gamemode="bomb"      onclick="UI.setGameMode('bomb')"      title="Plant / defuse the bomb">💣 Plant the Bomb</button>
+            <button class="gamemode-btn" data-gamemode="vip"       onclick="UI.setGameMode('vip')"       title="Escort or eliminate the VIP">👑 VIP Escort</button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <div class="control-label">Terrain Theme</div>
+          <div class="btn-group">
+            <button class="theme-btn" data-theme="urban"   onclick="UI.setTheme('urban')">🏙️ Urban</button>
+            <button class="theme-btn" data-theme="desert"  onclick="UI.setTheme('desert')">🏜️ Desert</button>
+            <button class="theme-btn" data-theme="arctic"  onclick="UI.setTheme('arctic')">❄️ Arctic</button>
+            <button class="theme-btn" data-theme="forest"  onclick="UI.setTheme('forest')">🌲 Forest</button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <div class="control-label">Building Density</div>
+          <div class="btn-group">
+            <button class="density-btn" data-density="light"  onclick="UI.setDensity('light')">Light</button>
+            <button class="density-btn" data-density="medium" onclick="UI.setDensity('medium')">Medium</button>
+            <button class="density-btn" data-density="heavy"  onclick="UI.setDensity('heavy')">Heavy</button>
+          </div>
+        </div>
+
+        <div class="control-group" id="fuse-control" style="display:none;">
+          <div class="control-label">💣 Bomb Fuse Length (rounds)</div>
+          <div class="btn-group">
+            <button class="density-btn" data-fuse="4"  onclick="UI.setBombFuse(4)">4</button>
+            <button class="density-btn" data-fuse="6"  onclick="UI.setBombFuse(6)">6</button>
+            <button class="density-btn active" data-fuse="8"  onclick="UI.setBombFuse(8)">8</button>
+            <button class="density-btn" data-fuse="10" onclick="UI.setBombFuse(10)">10</button>
+            <button class="density-btn" data-fuse="12" onclick="UI.setBombFuse(12)">12</button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <div class="control-label">Map</div>
+          <div class="btn-group">
+            <button class="reroll-btn" onclick="UI.rerollBattlefield()">🎲 New Random Map</button>
+            <button class="reroll-btn" onclick="UI.openMapEditor()" title="Draw on the map to customise it">✏️ Edit Map</button>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:10px; margin-top:4px; flex-wrap:wrap;">
+          <button class="btn btn-ghost" onclick="UI.showScreen('screen-army')">← Back</button>
+          <button class="btn btn-green" onclick="UI.startGame()">⚔️ Deploy &amp; Fight!</button>
+        </div>
+      </div>
+
+      <!-- Preview -->
+      <div class="bf-preview">
+        <div class="panel-title">MAP PREVIEW</div>
+        <canvas id="preview-canvas" style="border:2px solid var(--border); border-radius:6px;"></canvas>
+        <p style="font-size:11px; color:var(--text2); margin-top:6px;">
+          🔵 Alpha deploys left &nbsp;|&nbsp; 🔴 Bravo deploys right
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────
+     MAP EDITOR OVERLAY
+──────────────────────────────────────────────────────────────── -->
+<div id="map-editor-overlay" style="display:none; position:fixed; inset:0; z-index:400; background:rgba(0,0,0,0.85); backdrop-filter:blur(4px); align-items:center; justify-content:center; flex-direction:column; gap:12px;">
+  <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap; justify-content:center;">
+    <strong style="font-size:16px; letter-spacing:2px;">✏️ MAP EDITOR</strong>
+
+    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+      <button class="editor-brush-btn active" data-brush="open"     onclick="UI.setEditorBrush('open')"     title="Erase to open ground">🟫 Open</button>
+      <button class="editor-brush-btn"        data-brush="building" onclick="UI.setEditorBrush('building')" title="Paint solid building">🏢 Building</button>
+      <button class="editor-brush-btn"        data-brush="cover"    onclick="UI.setEditorBrush('cover')"    title="Paint low cover">🧱 Cover</button>
+      <button class="editor-brush-btn"        data-brush="rubble"   onclick="UI.setEditorBrush('rubble')"   title="Paint rubble">🪨 Rubble</button>
+    </div>
+
+    <button class="btn btn-ghost" style="font-size:12px;" onclick="UI.closeMapEditor()">✅ Done Editing</button>
+  </div>
+
+  <p style="font-size:11px; color:var(--text2);">Click or drag to paint. Deploy zones (left/right edges) are locked.</p>
+
+  <div style="overflow:auto; max-width:96vw; max-height:78vh; border:2px solid var(--border); border-radius:8px;">
+    <canvas id="editor-canvas" style="display:block; cursor:crosshair;"></canvas>
+  </div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────
+     SCREEN: MULTIPLAYER LOBBY
+──────────────────────────────────────────────────────────────── -->
+<div id="screen-lobby" class="screen" style="justify-content:center; align-items:center;">
+  <div class="lobby-container">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <button class="btn-back" onclick="UI.showScreen('screen-menu')">← Back</button>
+      <h2>🌐 Online Multiplayer</h2>
+    </div>
+    <p style="font-size:13px; color:var(--text2);">Play with friends in your browser — no account needed.</p>
+
+    <!-- Host -->
+    <div class="lobby-card">
+      <h3>🏠 Host a Game</h3>
+      <p style="font-size:12px; color:var(--text2);">Create a room and share the code with your friend.</p>
+      <button class="btn btn-blue" onclick="UI.hostGame()">Create Room</button>
+      <div id="room-code-display" style="display:none;"></div>
+    </div>
+
+    <!-- Join -->
+    <div class="lobby-card">
+      <h3>🔗 Join a Game</h3>
+      <p style="font-size:12px; color:var(--text2);">Enter the room code your friend shared.</p>
+      <input type="text" id="join-code-input" class="code-input" placeholder="ENTER CODE" spellcheck="false">
+      <button class="btn btn-blue" onclick="UI.joinGame()">Join Room</button>
+    </div>
+
+    <div id="lobby-status" style="text-align:center; font-size:13px; color:var(--text2);"></div>
+  </div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────
+     SCREEN: GAME
+──────────────────────────────────────────────────────────────── -->
+<div id="screen-game" class="screen">
+  <!-- Top bar: turn banner + menu button -->
+  <div class="top-bar">
+    <button class="game-menu-btn" onclick="UI.openGameMenu()" title="Menu">☰ Menu</button>
+    <div id="turn-banner" class="turn-banner">Rogue Warriors</div>
+    <div class="top-bar-spacer"></div>
+  </div>
+
+  <div id="game-layout">
+    <!-- LEFT PANEL: Actions + Deploy -->
+    <div class="side-panel" id="left-panel">
+      <!-- Deploy phase panel (shown during deploy) -->
+      <div class="panel-section" id="deploy-section" style="display:none; flex:1; min-height:0; flex-direction:column;">
+        <div class="panel-title" id="deploy-panel-title">PLACE YOUR UNITS</div>
+        <div class="deploy-instructions" id="deploy-instructions">
+          Click a unit below, then click a highlighted tile on the map to place it.
+        </div>
+        <div id="deploy-panel"></div>
+        <button class="deploy-done-btn" id="deploy-done-btn" onclick="UI.finishDeployment()" disabled>
+          ✅ Done Deploying
+        </button>
+      </div>
+      <!-- Normal actions panel (shown during playing) -->
+      <div class="panel-section" id="actions-section" style="flex-shrink:0;">
+        <div class="panel-title">ACTIONS</div>
+        <div id="action-buttons">
+          <div class="hint-text">← Select a game mode to start</div>
+        </div>
+      </div>
+      <div class="panel-section" id="stats-section" style="flex:1; min-height:0; display:flex; flex-direction:column;">
+        <div class="panel-title">UNIT STATS</div>
+        <div id="unit-stats-panel" style="padding:8px; font-size:12px; color:var(--text2); flex:1; overflow:auto;">
+          <p>Click a unit to see its stats</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- CENTER: Canvas -->
+    <div id="game-center">
+      <div id="battlefield-wrapper">
+        <canvas id="battlefield"></canvas>
+      </div>
+    </div>
+
+    <!-- RIGHT PANEL: Teams + Dice + Log -->
+    <div class="side-panel" id="right-panel">
+      <!-- Team 0 -->
+      <div class="panel-section">
+        <div class="panel-title" style="color:#3a9eff;">🔵 ALPHA TEAM</div>
+        <div id="team-panel-0" class="team-panel-inner"></div>
+      </div>
+      <!-- Team 1 -->
+      <div class="panel-section">
+        <div class="panel-title" style="color:#ff4545;">🔴 BRAVO TEAM</div>
+        <div id="team-panel-1" class="team-panel-inner"></div>
+      </div>
+      <!-- Dice results -->
+      <div class="panel-section" style="flex:1; min-height:0; display:flex; flex-direction:column;">
+        <div class="panel-title">🎲 DICE / LOG</div>
+        <div id="dice-panel" style="overflow-y:auto; max-height:160px; flex-shrink:0;"></div>
+        <div style="flex:1; overflow:auto; min-height:0;">
+          <div id="combat-log"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- In-Game Menu Overlay -->
+  <div id="game-menu-overlay">
+    <div class="game-menu-card">
+      <div class="gm-title">⚔ Game Menu</div>
+      <div class="gm-round" id="game-menu-round"></div>
+      <div class="gm-buttons">
+        <button class="btn btn-ghost gm-btn" onclick="UI.closeGameMenu()">▶ Resume Game</button>
+        <button class="btn btn-blue  gm-btn" onclick="UI.newGameFromMenu()">🔄 New Game (same mode)</button>
+        <button class="btn btn-gold  gm-btn" onclick="UI.mainMenuFromMenu()">🏠 Main Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Game Over Overlay -->
+  <div id="gameover-overlay">
+    <div class="go-card">
+      <div style="font-size:48px;">🏆</div>
+      <div id="go-title">Victory!</div>
+      <div id="go-subtitle"></div>
+      <div id="go-stats" style="font-size:13px; color:var(--text2);"></div>
+      <div style="display:flex; gap:12px; justify-content:center; margin-top:16px;">
+        <button class="btn btn-gold" onclick="UI.playAgain()">Play Again</button>
+        <button class="btn btn-ghost" onclick="UI.showScreen('screen-menu')">Main Menu</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Scripts ──────────────────────────────────────────────── -->
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="js/config.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/renderer.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/multiplayer.js"></script>
+<script src="js/ui.js"></script>
+<script>
+// ──────────────────────────────────────────────
+//  BOOT — build unit catalogue on page load
+// ──────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  // Populate unit catalogue
+  const cat = document.getElementById('unit-catalogue');
+  const icons = { rifleman:'🔫', sniper:'🎯', medic:'💉', grenadier:'💣', leader:'⭐', scout:'🏹' };
+  const statLabels = { move:'Mv', skill:'Hit', range:'Rng', dice:'Dice', defense:'Def' };
+
+  Object.entries(UNIT_DEFS).forEach(([key, def]) => {
+    const card = document.createElement('div');
+    card.className = 'unit-card';
+    card.onclick   = () => UI.addUnitToSquad(key);
+    card.innerHTML = `
+      <div class="uc-header">
+        <div class="uc-icon" style="background:${def.color}">${icons[key]}</div>
+        <div>
+          <div class="uc-name">${def.name}</div>
+          <div class="uc-cost">${def.cost} pt${def.cost !== 1 ? 's' : ''}</div>
+        </div>
+      </div>
+      <div class="uc-stats">
+        <span class="stat">Mv <strong>${def.move}</strong></span>
+        <span class="stat">Hit <strong>${def.skill}+</strong></span>
+        <span class="stat">Rng <strong>${def.range}</strong></span>
+        <span class="stat">Dice <strong>${def.dice}d6</strong></span>
+        <span class="stat">Def <strong>${def.defense}+</strong></span>
+      </div>
+      ${def.ability ? `<div class="uc-ability">⚡ ${def.ability.charAt(0).toUpperCase() + def.ability.slice(1)}</div>` : ''}
+      <div class="uc-desc">${def.desc}</div>
+    `;
+    cat.appendChild(card);
+  });
+
+  // Set defaults
+  UI.setTheme('urban');
+  UI.setDensity('medium');
+  UI.setGameMode('elimination');
+
+  // Mouse-follow tooltip
+  document.addEventListener('mousemove', (e) => {
+    const tt = document.getElementById('tooltip');
+    if (tt && tt.style.display === 'block') {
+      tt.style.left = (e.clientX + 14) + 'px';
+      tt.style.top  = (e.clientY - 10) + 'px';
+    }
+  });
+
+  console.log('%c⚔ Rogue Warriors Digital — Loaded', 'color:#ffbe0b; font-size:16px; font-weight:bold;');
+
+  // Escape key toggles in-game menu
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const overlay = document.getElementById('game-menu-overlay');
+      if (!overlay) return;
+      if (overlay.classList.contains('open')) {
+        UI.closeGameMenu();
+      } else if (document.getElementById('screen-game').classList.contains('active')) {
+        UI.openGameMenu();
+      }
+    }
+  });
+});
+
+// room-code-display visibility is now managed inside UI.hostGame() directly.
+</script>
+</body>
+</html>
