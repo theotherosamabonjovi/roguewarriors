@@ -857,7 +857,7 @@ const UI = {
 
   _doBlast(attacker, cx, cy) {
     const state = this.engine;
-    if (state.actionsLeft < 2) return;
+    if (state.actionsLeft < 1) return;
     const results = state.resolveBlast(attacker, cx, cy);
     // Flash the attacker and all units caught in the blast
     this.renderer.triggerFlash(attacker.id);
@@ -867,7 +867,7 @@ const UI = {
     }
     // Brief tile flash on the target area
     this.renderer.triggerBlastFlash(cx, cy);
-    state.useAction(2);
+    state.useAction(1);
     this._afterAction(attacker, {
       type: 'blast', unitId: attacker.id, x: cx, y: cy,
       results: results.map(r => ({ targetId: r.target, wounds: r.wounds,
@@ -1084,7 +1084,7 @@ const UI = {
         if (!state.getActiveUnit()) state.activateUnit(unit);
         if (unit) {
           state.resolveBlast(unit, action.x, action.y);
-          state.useAction(2);
+          state.useAction(1);
         }
         break;
       }
@@ -1095,7 +1095,7 @@ const UI = {
         if (unit.ability === 'blast' && action.x !== undefined) {
           const results = state.resolveBlast(unit, action.x, action.y);
           this._showDiceResult(results[0]);
-          state.useAction(2);
+          state.useAction(1);
         } else if (unit.ability === 'heal' && action.targetId) {
           const healTarget = state.getUnit(action.targetId);
           if (healTarget) { state.tryHeal(unit, healTarget); state.useAction(1); }
@@ -1491,10 +1491,8 @@ const UI = {
     addBtn('btnTakeCover',   'Take Cover', '🛡️', al >= 1, '+1 Defense until next activation');
     if (unit.ability) {
       const abilityLabels = { overwatch:'Overwatch', heal:'Heal', blast:'Grenade', stealth:'Stealth', command:'Command', sniper:'Overwatch' };
-      // blast and overwatch cost 2 actions; heal, stealth, command cost 1
-      const abilityCost = (unit.ability === 'blast' || unit.ability === 'overwatch') ? 2 : 1;
       addBtn('btnAbility', abilityLabels[unit.ability] || 'Ability', '⚡',
-             al >= abilityCost && !state.abilityUsed?.has(unit.id), 'Use specialist ability');
+             al >= 1 && !state.abilityUsed?.has(unit.id), 'Use specialist ability');
     }
 
     // ── Objective action buttons ──

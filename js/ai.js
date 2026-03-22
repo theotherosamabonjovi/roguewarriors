@@ -59,11 +59,11 @@ class AIPlayer {
     if (targets.length > 0 && actionsLeft >= 2) {
       const best = this._pickTarget(state, unit, targets);
       // Use ability first if grenadier and multiple clustered enemies
-      if (unit.ability === 'blast' && actionsLeft >= 2) {
+      if (unit.ability === 'blast' && actionsLeft >= 1) {
         const cluster = this._findBestBlastTile(state, unit, targets);
         if (cluster) {
           actions.push({ type: 'ability', unitId: unit.id, x: cluster.x, y: cluster.y });
-          actionsLeft -= 2;
+          actionsLeft -= 1;
         } else {
           actions.push({ type: 'aim',   unitId: unit.id });
           actions.push({ type: 'shoot', unitId: unit.id, targetId: best.id });
