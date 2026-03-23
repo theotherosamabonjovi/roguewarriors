@@ -667,31 +667,34 @@ class Engine {
   // ─── Objective initialisation ──────────────────────────────
   initObjectives() {
     const { COLS, ROWS } = CFG;
-    const cx = Math.floor(COLS / 2);
-    const cy = Math.floor(ROWS / 2);
+    const cx  = Math.floor(COLS / 2);
+    const cy  = Math.floor(ROWS / 2);
+    // Custom positions from scenario editor (if any)
+    const cus = this._scCustomObjectives || {};
 
     if (this.gameMode === 'ctf') {
-      // Place flag at centre (find nearest open tile)
-      const flagPos = this._nearestOpen(cx, cy);
+      const flagPos = cus.flag
+        ? this._nearestOpen(cus.flag.x, cus.flag.y)
+        : this._nearestOpen(cx, cy);
       this.objectives = {
         flag: { x: flagPos.x, y: flagPos.y, carriedBy: null, capturedBy: null },
       };
       this.addLog('🚩 Capture the Flag — grab the flag at centre and return it to your base!', 'system');
 
     } else if (this.gameMode === 'bomb') {
-      // Two bomb sites on opposite sides of the map
-      const site1 = this._nearestOpen(Math.floor(COLS * 0.35), Math.floor(ROWS * 0.3));
-      const site2 = this._nearestOpen(Math.floor(COLS * 0.65), Math.floor(ROWS * 0.7));
-      // The bomb starts at centre — Attackers must pick it up and carry it to a site
-      const bombStart = this._nearestOpen(cx, cy);
+      const site1    = cus.site_a  ? this._nearestOpen(cus.site_a.x,  cus.site_a.y)
+                                   : this._nearestOpen(Math.floor(COLS * 0.35), Math.floor(ROWS * 0.3));
+      const site2    = cus.site_b  ? this._nearestOpen(cus.site_b.x,  cus.site_b.y)
+                                   : this._nearestOpen(Math.floor(COLS * 0.65), Math.floor(ROWS * 0.7));
+      const bombStart = cus.bomb   ? this._nearestOpen(cus.bomb.x,    cus.bomb.y)
+                                   : this._nearestOpen(cx, cy);
       const fuseLen = (this.bombFuseLength && this.bombFuseLength >= 1) ? this.bombFuseLength : 8;
       this.objectives = {
         sites: [
-          { id: 0, x: site1.x, y: site1.y, planted: false, defused: false },
-          { id: 1, x: site2.x, y: site2.y, planted: false, defused: false },
+          { id: 0, x: site1.x,     y: site1.y,     planted: false, defused: false },
+          { id: 1, x: site2.x,     y: site2.y,     planted: false, defused: false },
         ],
-        // Physical bomb object — starts at centre, must be carried to a site
-        bomb: { x: bombStart.x, y: bombStart.y, carriedBy: null },
+        bomb:        { x: bombStart.x, y: bombStart.y, carriedBy: null },
         bombPlanted: false,
         bombTimer:   0,
         maxTimer:    fuseLen,
@@ -700,10 +703,13 @@ class Engine {
       this.addLog(`💣 Plant the Bomb — Attackers: pick up the bomb and carry it to a site. Defenders have ${fuseLen} rounds to defuse!`, 'system');
 
     } else if (this.gameMode === 'vip') {
-      // VIP is designated during _beginBattle once units exist
-      this.objectives = { vipId: null, extractX: CFG.COLS - 2, extractY: Math.floor(ROWS / 2) };
+      const ex = cus.extract ? cus.extract.x : CFG.COLS - 2;
+      const ey = cus.extract ? cus.extract.y : Math.floor(ROWS / 2);
+      this.objectives = { vipId: null, extractX: ex, extractY: ey };
       this.addLog('👑 VIP Escort — Alpha must get the VIP to the extraction point. Bravo must eliminate them!', 'system');
     }
+    // Clear custom positions after use so they don't affect new games
+    this._scCustomObjectives = null;
   }
 
   _nearestOpen(cx, cy) {

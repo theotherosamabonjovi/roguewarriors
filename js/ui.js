@@ -1878,21 +1878,25 @@ const UI = {
   },
 
   // ─── Scenario Editor ─────────────────────────────────────
-  _scEngine: null,   // Engine instance holding the scenario board
-  _scSquads: [[], []], // unit type arrays for team 0 and team 1
-  _scMode:   'elimination',
-  _scTheme:  'urban',
+  _scEngine:    null,
+  _scSquads:    [[], []],
+  _scMode:      'elimination',
+  _scTheme:     'urban',
+  _scObjectives: {},       // custom objective placements keyed by mode
+  _scObjBrush:  null,      // which objective the user is currently placing
 
   showScenarioEditor() {
     this.showScreen('screen-scenario');
-    // Build a fresh engine for the preview map
-    if (!this._scEngine) {
-      this._scEngine = new Engine();
-      this._scEngine.generateBoard(this._scTheme, 'medium');
-      this._scEngine.theme = this._scTheme;
-    }
-    this._scRenderPreview();
+    if (!this._scEngine) this._scNewMap();
+    this._scRenderAll();
     this._scRenderSquads();
+    this.scSetMode(this._scMode);
+  },
+
+  _scNewMap() {
+    this._scEngine = new Engine();
+    this._scEngine.generateBoard(this._scTheme, 'medium');
+    this._scEngine.theme = this._scTheme;
   },
 
   scSetMode(mode) {
@@ -1900,6 +1904,8 @@ const UI = {
     document.querySelectorAll('[data-sc-mode]').forEach(b => b.classList.remove('active'));
     const btn = document.querySelector(`[data-sc-mode="${mode}"]`);
     if (btn) btn.classList.add('active');
+    this._scRenderObjectivePanel();
+    this._scRenderAll();
   },
 
   scSetTheme(theme) {
@@ -1907,33 +1913,83 @@ const UI = {
     document.querySelectorAll('[data-sc-theme]').forEach(b => b.classList.remove('active'));
     const btn = document.querySelector(`[data-sc-theme="${theme}"]`);
     if (btn) btn.classList.add('active');
-    if (this._scEngine) {
-      this._scEngine.theme = theme;
-      this._scRenderPreview();
-    }
+    if (this._scEngine) { this._scEngine.theme = theme; this._scRenderAll(); }
   },
 
   scRerollMap() {
-    this._scEngine = new Engine();
-    this._scEngine.generateBoard(this._scTheme, 'medium');
-    this._scEngine.theme = this._scTheme;
-    this._scRenderPreview();
+    this._scNewMap();
+    this._scRenderAll();
     this._scSetStatus('New map generated.');
   },
 
   scOpenMapEditor() {
-    // Temporarily wire the map editor overlay to the scenario engine
     const prev = this._previewEngine;
     this._previewEngine = this._scEngine;
     this.openMapEditor();
-    // Patch close to restore and re-render scenario preview
     const origClose = this.closeMapEditor.bind(this);
     this.closeMapEditor = () => {
       origClose();
       this._previewEngine = prev;
-      this._scRenderPreview();
-      this.closeMapEditor = origClose; // restore
+      this._scRenderAll();
+      this.closeMapEditor = origClose;
     };
+  },
+
+  // ── Objective placement brush ────────────────────────────
+  // Each mode has a set of placeable items. User clicks a brush button then
+  // clicks on the preview canvas to place that item at a tile.
+  _scObjDefs() {
+    return {
+      ctf:         [{ key:'flag',    label:'🚩 Flag',       desc:'Flag start position' }],
+      bomb:        [{ key:'bomb',    label:'💣 Bomb',       desc:'Bomb start position' },
+                   { key:'site_a',  label:'📍 Site A',     desc:'Bomb plant site A' },
+                   { key:'site_b',  label:'📍 Site B',     desc:'Bomb plant site B' }],
+      vip:         [{ key:'extract',label:'🚁 Extract',    desc:'VIP extraction point' }],
+      elimination: [],
+    };
+  },
+
+  scSetObjBrush(key) {
+    this._scObjBrush = (this._scObjBrush === key) ? null : key; // toggle off if same
+    this._scRenderObjectivePanel();
+    this._scSetStatus(this._scObjBrush
+      ? `Click on the map to place: ${key}`
+      : 'Brush deselected.');
+  },
+
+  _scRenderObjectivePanel() {
+    const el = document.getElementById('sc-obj-panel');
+    if (!el) return;
+    const defs = (this._scObjDefs()[this._scMode] || []);
+    if (!defs.length) {
+      el.innerHTML = '<span style="color:var(--text2);font-size:12px;">No objectives for this mode.</span>';
+      this._scObjBrush = null;
+      return;
+    }
+    el.innerHTML = '';
+    defs.forEach(d => {
+      const btn = document.createElement('button');
+      btn.className = 'density-btn' + (this._scObjBrush === d.key ? ' active' : '');
+      btn.textContent = d.label;
+      btn.title = d.desc;
+      btn.onclick = () => this.scSetObjBrush(d.key);
+      // Show current placement if set
+      const pos = this._scObjectives[d.key];
+      const posStr = pos ? ` (${pos.x},${pos.y})` : ' — not placed';
+      const info = document.createElement('span');
+      info.style.cssText = 'font-size:11px;color:var(--text2);margin-left:4px;';
+      info.textContent = posStr;
+      el.appendChild(btn);
+      el.appendChild(info);
+      el.appendChild(document.createElement('br'));
+    });
+  },
+
+  // ── Preview canvas (map + objectives) ───────────────────
+  _scRenderAll() {
+    this._scRenderPreview();
+    this._scRenderObjectivePanel();
+    this._scAttachPreviewClicks();
   },
 
   _scRenderPreview() {
@@ -1941,11 +1997,13 @@ const UI = {
     if (!eng) return;
     const canvas = document.getElementById('sc-preview');
     if (!canvas) return;
-    const T = 10;
+    const T = 14;
     canvas.width  = CFG.COLS * T;
     canvas.height = CFG.ROWS * T;
     const ctx = canvas.getContext('2d');
     const thm = THEMES[eng.theme] || THEMES.urban;
+
+    // Tiles
     for (let r = 0; r < CFG.ROWS; r++) {
       for (let c = 0; c < CFG.COLS; c++) {
         const tile = eng.board[r][c];
@@ -1957,17 +2015,61 @@ const UI = {
         ctx.fillRect(c * T, r * T, T, T);
       }
     }
+
     // Deploy zone tints
-    ctx.fillStyle = 'rgba(58,158,255,0.2)';
+    ctx.fillStyle = 'rgba(58,158,255,0.18)';
     ctx.fillRect(0, 0, T * 4, CFG.ROWS * T);
-    ctx.fillStyle = 'rgba(255,69,69,0.2)';
+    ctx.fillStyle = 'rgba(255,69,69,0.18)';
     ctx.fillRect(T * (CFG.COLS - 4), 0, T * 4, CFG.ROWS * T);
+
+    // Draw placed objectives
+    const objIcons = { flag:'🚩', bomb:'💣', site_a:'🅰', site_b:'🅱', extract:'🚁' };
+    Object.entries(this._scObjectives).forEach(([key, pos]) => {
+      if (!pos) return;
+      ctx.font = `${T - 2}px serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(objIcons[key] || '📍', pos.x * T + T / 2, pos.y * T + T / 2);
+    });
+
+    // Cursor highlight for active brush
+    if (this._scObjBrush) {
+      ctx.strokeStyle = 'rgba(255,220,0,0.9)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([3, 3]);
+      ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+      ctx.setLineDash([]);
+    }
+
+    canvas._T = T;
   },
 
+  _scAttachPreviewClicks() {
+    const canvas = document.getElementById('sc-preview');
+    if (!canvas || canvas._scClickAttached) return;
+    canvas._scClickAttached = true;
+    canvas.style.cursor = 'crosshair';
+    canvas.addEventListener('click', (e) => {
+      if (!this._scObjBrush) return;
+      const rect = canvas.getBoundingClientRect();
+      const T    = canvas._T || 14;
+      const scaleX = canvas.width  / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const tx = Math.floor((e.clientX - rect.left) * scaleX / T);
+      const ty = Math.floor((e.clientY - rect.top)  * scaleY / T);
+      if (!this._scEngine._inBounds(tx, ty)) return;
+      if (this._scEngine.board[ty][tx].type === TILE.BUILDING) {
+        this._scSetStatus('Cannot place on a building tile.'); return;
+      }
+      this._scObjectives[this._scObjBrush] = { x: tx, y: ty };
+      this._scSetStatus(`${this._scObjBrush} placed at (${tx},${ty})`);
+      this._scRenderAll();
+    });
+  },
+
+  // ── Squads ───────────────────────────────────────────────
   scAddUnit(team, type) {
-    const MAX = 6;
-    if (this._scSquads[team].length >= MAX) {
-      this._scSetStatus(`Max ${MAX} units per team.`); return;
+    if (this._scSquads[team].length >= 6) {
+      this._scSetStatus('Max 6 units per team.'); return;
     }
     this._scSquads[team].push(type);
     this._scRenderSquads();
@@ -1980,8 +2082,9 @@ const UI = {
   },
 
   _scRenderSquads() {
-    const icons = { rifleman:'🔫', sniper:'🎯', medic:'💉', grenadier:'💣', leader:'⭐', scout:'🏹' };
-    const colors = { rifleman:'#4a7fc1', sniper:'#7a5c2a', medic:'#2a7a4a', grenadier:'#7a2a2a', leader:'#7a6a1a', scout:'#2a5a4a' };
+    const icons  = { rifleman:'🔫', sniper:'🎯', medic:'💉', grenadier:'💣', leader:'⭐', scout:'🏹' };
+    const colors = { rifleman:'#4a7fc1', sniper:'#7a5c2a', medic:'#2a7a4a',
+                     grenadier:'#7a2a2a', leader:'#7a6a1a', scout:'#2a5a4a' };
     [0, 1].forEach(team => {
       const el = document.getElementById(`sc-squad-${team}`);
       if (!el) return;
@@ -1992,9 +2095,10 @@ const UI = {
       }
       this._scSquads[team].forEach((type, idx) => {
         const chip = document.createElement('div');
-        chip.style.cssText = `display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:12px;background:${colors[type] || '#555'};font-size:12px;cursor:pointer;`;
+        chip.style.cssText = `display:inline-flex;align-items:center;gap:4px;padding:3px 8px;` +
+          `border-radius:12px;background:${colors[type]||'#555'};font-size:12px;cursor:pointer;`;
         chip.title = 'Click to remove';
-        chip.innerHTML = `${icons[type] || '?'} ${type}`;
+        chip.textContent = `${icons[type]||'?'} ${type}`;
         chip.onclick = () => this.scRemoveUnit(team, idx);
         el.appendChild(chip);
       });
@@ -2006,67 +2110,79 @@ const UI = {
     if (el) el.textContent = msg;
   },
 
-  // Validate the scenario and launch it
+  // ── Validation & play ────────────────────────────────────
+  _scValidate() {
+    if (!this._scEngine)                          return 'Generate a map first.';
+    if (!this._scSquads[0].length)                return 'Alpha team needs units.';
+    if (!this._scSquads[1].length)                return 'Bravo team needs units.';
+    if (!this._scSquads[0].includes('leader'))    return 'Alpha needs a Leader.';
+    if (!this._scSquads[1].includes('leader'))    return 'Bravo needs a Leader.';
+    const mode = this._scMode;
+    const obj  = this._scObjectives;
+    if (mode === 'ctf'  && !obj.flag)              return 'Place the CTF flag on the map.';
+    if (mode === 'bomb' && !obj.bomb)              return 'Place the bomb on the map.';
+    if (mode === 'bomb' && !obj.site_a)            return 'Place bomb site A on the map.';
+    if (mode === 'bomb' && !obj.site_b)            return 'Place bomb site B on the map.';
+    if (mode === 'vip'  && !obj.extract)           return 'Place the VIP extraction point.';
+    return null;
+  },
+
   scPlayScenario() {
     const err = this._scValidate();
     if (err) { this._scSetStatus('⚠️ ' + err); return; }
 
-    // Build engine from scenario
-    const eng = this._scEngine;
-    eng.players[0].squadDef = this._scSquads[0];
-    eng.players[1].squadDef = this._scSquads[1];
-    eng.mode     = 'ai';
-    eng.gameMode = this._scMode;
+    const scEng = this._scEngine;
 
-    // Adopt engine into the main game flow
-    this._previewEngine = eng;
-    this.armyDraft = [this._scSquads[0].slice(), this._scSquads[1].slice()];
-    this.mode      = 'ai';
-    this.gameMode  = this._scMode;
-    this.theme     = this._scTheme;
+    // Stamp objective positions onto the engine so initObjectives uses them.
+    // We do this by patching initObjectives to use our custom positions
+    // for the one _beginBattle call, then restore it.
+    scEng._scCustomObjectives = this._scObjectives;
 
-    // Auto-build AI squad from the scenario's Bravo team
-    this.ai = new AIPlayer(1);
+    // Wire squads and mode
+    scEng.players[0].squadDef = this._scSquads[0].slice();
+    scEng.players[1].squadDef = this._scSquads[1].slice();
+    scEng.mode           = 'ai';
+    scEng.gameMode       = this._scMode;
+    scEng.bombFuseLength = 8;
+
+    // Inject directly — bypass renderBattlefieldPreview which would overwrite the board
+    this._previewEngine = scEng;
+    this.armyDraft      = [scEng.players[0].squadDef, scEng.players[1].squadDef];
+    this.mode           = 'ai';
+    this.gameMode       = this._scMode;
+    this.theme          = this._scTheme;
+    this.ai             = new AIPlayer(1);
+
     this.startGame();
     this._scSetStatus('');
   },
 
-  _scValidate() {
-    if (!this._scEngine) return 'No map — generate a map first.';
-    if (!this._scSquads[0].length) return 'Alpha team needs at least 1 unit.';
-    if (!this._scSquads[1].length) return 'Bravo team needs at least 1 unit.';
-    if (!this._scSquads[0].includes('leader')) return 'Alpha team needs a Leader.';
-    if (!this._scSquads[1].includes('leader')) return 'Bravo team needs a Leader.';
-    return null;
-  },
-
-  // Save scenario as a .json file the player can keep and share
+  // ── Save / Load ──────────────────────────────────────────
   scSave() {
     const err = this._scValidate();
     if (err) { this._scSetStatus('⚠️ ' + err); return; }
-    const name = document.getElementById('sc-name')?.value.trim() || 'my-scenario';
+    const name = (document.getElementById('sc-name')?.value.trim()) || 'scenario';
     const eng  = this._scEngine;
     const data = {
-      version:   1,
+      version:    2,
       name,
-      gameMode:  this._scMode,
-      theme:     this._scTheme,
-      squads:    [this._scSquads[0].slice(), this._scSquads[1].slice()],
-      board:     eng.board,
-      buildings: eng.buildings,
-      coverObjs: eng.coverObjs,
+      gameMode:   this._scMode,
+      theme:      this._scTheme,
+      squads:     [this._scSquads[0].slice(), this._scSquads[1].slice()],
+      objectives: this._scObjectives,
+      board:      eng.board,
+      buildings:  eng.buildings,
+      coverObjs:  eng.coverObjs,
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
-    a.href     = url;
-    a.download = name.replace(/[^a-zA-Z0-9_-]/g, '_') + '.json';
+    a.href = url; a.download = name.replace(/[^a-zA-Z0-9_-]/g, '_') + '.json';
     a.click();
     URL.revokeObjectURL(url);
     this._scSetStatus(`✅ Saved "${name}.json"`);
   },
 
-  // Load a scenario from a .json file
   scLoad(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -2074,29 +2190,22 @@ const UI = {
     reader.onload = (e) => {
       try {
         const data = JSON.parse(e.target.result);
-        if (!data.version || !data.board || !data.squads) throw new Error('Invalid scenario file.');
-
-        // Restore engine
+        if (!data.board || !data.squads) throw new Error('Invalid scenario file.');
         const eng = new Engine();
         eng.board     = data.board;
         eng.buildings = data.buildings || [];
         eng.coverObjs = data.coverObjs || [];
         eng.theme     = data.theme || 'urban';
-        this._scEngine = eng;
-
-        // Restore squads and settings
-        this._scSquads = [data.squads[0] || [], data.squads[1] || []];
-        this._scMode   = data.gameMode || 'elimination';
-        this._scTheme  = data.theme    || 'urban';
-
-        // Update name field
+        this._scEngine     = eng;
+        this._scSquads     = [data.squads[0] || [], data.squads[1] || []];
+        this._scMode       = data.gameMode || 'elimination';
+        this._scTheme      = data.theme    || 'urban';
+        this._scObjectives = data.objectives || {};
         const nameEl = document.getElementById('sc-name');
         if (nameEl) nameEl.value = data.name || '';
-
-        // Sync button states
         this.scSetMode(this._scMode);
         this.scSetTheme(this._scTheme);
-        this._scRenderPreview();
+        this._scRenderAll();
         this._scRenderSquads();
         this._scSetStatus(`✅ Loaded "${data.name}"`);
       } catch (err) {
@@ -2104,7 +2213,6 @@ const UI = {
       }
     };
     reader.readAsText(file);
-    // Reset input so same file can be reloaded
     event.target.value = '';
   },
 

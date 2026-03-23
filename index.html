@@ -84,8 +84,17 @@
         </div>
 
         <div class="control-group">
-          <div class="panel-title" style="margin-bottom:6px;">Map Preview</div>
-          <canvas id="sc-preview" style="border:2px solid var(--border); border-radius:6px; display:block;"></canvas>
+          <div class="panel-title" style="margin-bottom:6px;">Objectives</div>
+          <div id="sc-obj-panel" style="display:flex;flex-direction:column;gap:6px;">
+            <span style="color:var(--text2);font-size:12px;">Select a game mode to place objectives.</span>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <div class="panel-title" style="margin-bottom:4px;">Map Preview <span style="font-size:11px;color:var(--text2);">(click to place objective)</span></div>
+          <div style="overflow:auto; max-width:100%;">
+            <canvas id="sc-preview" style="border:2px solid var(--border); border-radius:6px; display:block; cursor:crosshair;"></canvas>
+          </div>
         </div>
       </div>
 
