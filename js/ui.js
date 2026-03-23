@@ -1023,8 +1023,34 @@ const UI = {
 
     const actions = this.ai.planTurn(this.engine);
     if (!actions.length) {
-      this.engine.endActivation();
+      // planTurn returned nothing — either all AI units are already activated
+      // this round, or the AI has no living units left.
+      // endActivation() returns early when activeUnit===null (nothing to end),
+      // leaving currentPlayer=1 and the game deadlocked.
+      // Fix: find any unactivated living AI unit and end its activation properly,
+      // OR if all AI units are done, force-advance the round-end check.
+      const state = this.engine;
+      const unactivated = state.units.filter(
+        u => u.alive && u.team === 1 && !state.activatedThisRound.has(u.id)
+      );
+      if (unactivated.length) {
+        // There IS a unit but AI couldn't plan for it — activate and immediately end
+        state.activateUnit(unactivated[0]);
+        state.endActivation();
+      } else {
+        // All AI units already activated — force the round-end check
+        // by running endActivation on a dummy activation of the last AI unit,
+        // or just directly nudge the engine state.
+        const lastAI = state.units.filter(u => u.alive && u.team === 1);
+        if (lastAI.length && !state.getActiveUnit()) {
+          state.activateUnit(lastAI[0]);
+          state.endActivation();
+        } else {
+          state.endActivation();
+        }
+      }
       this._updateAllPanels();
+      this._checkAITurn();
       return;
     }
 
@@ -1850,4 +1876,236 @@ const UI = {
   showHowToPlay() {
     this.showScreen('screen-howtoplay');
   },
+
+  // ─── Scenario Editor ─────────────────────────────────────
+  _scEngine: null,   // Engine instance holding the scenario board
+  _scSquads: [[], []], // unit type arrays for team 0 and team 1
+  _scMode:   'elimination',
+  _scTheme:  'urban',
+
+  showScenarioEditor() {
+    this.showScreen('screen-scenario');
+    // Build a fresh engine for the preview map
+    if (!this._scEngine) {
+      this._scEngine = new Engine();
+      this._scEngine.generateBoard(this._scTheme, 'medium');
+      this._scEngine.theme = this._scTheme;
+    }
+    this._scRenderPreview();
+    this._scRenderSquads();
+  },
+
+  scSetMode(mode) {
+    this._scMode = mode;
+    document.querySelectorAll('[data-sc-mode]').forEach(b => b.classList.remove('active'));
+    const btn = document.querySelector(`[data-sc-mode="${mode}"]`);
+    if (btn) btn.classList.add('active');
+  },
+
+  scSetTheme(theme) {
+    this._scTheme = theme;
+    document.querySelectorAll('[data-sc-theme]').forEach(b => b.classList.remove('active'));
+    const btn = document.querySelector(`[data-sc-theme="${theme}"]`);
+    if (btn) btn.classList.add('active');
+    if (this._scEngine) {
+      this._scEngine.theme = theme;
+      this._scRenderPreview();
+    }
+  },
+
+  scRerollMap() {
+    this._scEngine = new Engine();
+    this._scEngine.generateBoard(this._scTheme, 'medium');
+    this._scEngine.theme = this._scTheme;
+    this._scRenderPreview();
+    this._scSetStatus('New map generated.');
+  },
+
+  scOpenMapEditor() {
+    // Temporarily wire the map editor overlay to the scenario engine
+    const prev = this._previewEngine;
+    this._previewEngine = this._scEngine;
+    this.openMapEditor();
+    // Patch close to restore and re-render scenario preview
+    const origClose = this.closeMapEditor.bind(this);
+    this.closeMapEditor = () => {
+      origClose();
+      this._previewEngine = prev;
+      this._scRenderPreview();
+      this.closeMapEditor = origClose; // restore
+    };
+  },
+
+  _scRenderPreview() {
+    const eng = this._scEngine;
+    if (!eng) return;
+    const canvas = document.getElementById('sc-preview');
+    if (!canvas) return;
+    const T = 10;
+    canvas.width  = CFG.COLS * T;
+    canvas.height = CFG.ROWS * T;
+    const ctx = canvas.getContext('2d');
+    const thm = THEMES[eng.theme] || THEMES.urban;
+    for (let r = 0; r < CFG.ROWS; r++) {
+      for (let c = 0; c < CFG.COLS; c++) {
+        const tile = eng.board[r][c];
+        let color = (c + r) % 2 === 0 ? thm.base : thm.baseAlt;
+        if (tile.type === TILE.BUILDING) color = thm.buildingColor;
+        if (tile.type === TILE.COVER)    color = thm.coverColor;
+        if (tile.type === TILE.RUBBLE)   color = '#6a5040';
+        ctx.fillStyle = color;
+        ctx.fillRect(c * T, r * T, T, T);
+      }
+    }
+    // Deploy zone tints
+    ctx.fillStyle = 'rgba(58,158,255,0.2)';
+    ctx.fillRect(0, 0, T * 4, CFG.ROWS * T);
+    ctx.fillStyle = 'rgba(255,69,69,0.2)';
+    ctx.fillRect(T * (CFG.COLS - 4), 0, T * 4, CFG.ROWS * T);
+  },
+
+  scAddUnit(team, type) {
+    const MAX = 6;
+    if (this._scSquads[team].length >= MAX) {
+      this._scSetStatus(`Max ${MAX} units per team.`); return;
+    }
+    this._scSquads[team].push(type);
+    this._scRenderSquads();
+    this._scSetStatus('');
+  },
+
+  scRemoveUnit(team, idx) {
+    this._scSquads[team].splice(idx, 1);
+    this._scRenderSquads();
+  },
+
+  _scRenderSquads() {
+    const icons = { rifleman:'🔫', sniper:'🎯', medic:'💉', grenadier:'💣', leader:'⭐', scout:'🏹' };
+    const colors = { rifleman:'#4a7fc1', sniper:'#7a5c2a', medic:'#2a7a4a', grenadier:'#7a2a2a', leader:'#7a6a1a', scout:'#2a5a4a' };
+    [0, 1].forEach(team => {
+      const el = document.getElementById(`sc-squad-${team}`);
+      if (!el) return;
+      el.innerHTML = '';
+      if (!this._scSquads[team].length) {
+        el.innerHTML = '<span style="color:var(--text2);font-size:12px;padding:4px;">No units yet</span>';
+        return;
+      }
+      this._scSquads[team].forEach((type, idx) => {
+        const chip = document.createElement('div');
+        chip.style.cssText = `display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:12px;background:${colors[type] || '#555'};font-size:12px;cursor:pointer;`;
+        chip.title = 'Click to remove';
+        chip.innerHTML = `${icons[type] || '?'} ${type}`;
+        chip.onclick = () => this.scRemoveUnit(team, idx);
+        el.appendChild(chip);
+      });
+    });
+  },
+
+  _scSetStatus(msg) {
+    const el = document.getElementById('sc-status');
+    if (el) el.textContent = msg;
+  },
+
+  // Validate the scenario and launch it
+  scPlayScenario() {
+    const err = this._scValidate();
+    if (err) { this._scSetStatus('⚠️ ' + err); return; }
+
+    // Build engine from scenario
+    const eng = this._scEngine;
+    eng.players[0].squadDef = this._scSquads[0];
+    eng.players[1].squadDef = this._scSquads[1];
+    eng.mode     = 'ai';
+    eng.gameMode = this._scMode;
+
+    // Adopt engine into the main game flow
+    this._previewEngine = eng;
+    this.armyDraft = [this._scSquads[0].slice(), this._scSquads[1].slice()];
+    this.mode      = 'ai';
+    this.gameMode  = this._scMode;
+    this.theme     = this._scTheme;
+
+    // Auto-build AI squad from the scenario's Bravo team
+    this.ai = new AIPlayer(1);
+    this.startGame();
+    this._scSetStatus('');
+  },
+
+  _scValidate() {
+    if (!this._scEngine) return 'No map — generate a map first.';
+    if (!this._scSquads[0].length) return 'Alpha team needs at least 1 unit.';
+    if (!this._scSquads[1].length) return 'Bravo team needs at least 1 unit.';
+    if (!this._scSquads[0].includes('leader')) return 'Alpha team needs a Leader.';
+    if (!this._scSquads[1].includes('leader')) return 'Bravo team needs a Leader.';
+    return null;
+  },
+
+  // Save scenario as a .json file the player can keep and share
+  scSave() {
+    const err = this._scValidate();
+    if (err) { this._scSetStatus('⚠️ ' + err); return; }
+    const name = document.getElementById('sc-name')?.value.trim() || 'my-scenario';
+    const eng  = this._scEngine;
+    const data = {
+      version:   1,
+      name,
+      gameMode:  this._scMode,
+      theme:     this._scTheme,
+      squads:    [this._scSquads[0].slice(), this._scSquads[1].slice()],
+      board:     eng.board,
+      buildings: eng.buildings,
+      coverObjs: eng.coverObjs,
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = name.replace(/[^a-zA-Z0-9_-]/g, '_') + '.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    this._scSetStatus(`✅ Saved "${name}.json"`);
+  },
+
+  // Load a scenario from a .json file
+  scLoad(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        if (!data.version || !data.board || !data.squads) throw new Error('Invalid scenario file.');
+
+        // Restore engine
+        const eng = new Engine();
+        eng.board     = data.board;
+        eng.buildings = data.buildings || [];
+        eng.coverObjs = data.coverObjs || [];
+        eng.theme     = data.theme || 'urban';
+        this._scEngine = eng;
+
+        // Restore squads and settings
+        this._scSquads = [data.squads[0] || [], data.squads[1] || []];
+        this._scMode   = data.gameMode || 'elimination';
+        this._scTheme  = data.theme    || 'urban';
+
+        // Update name field
+        const nameEl = document.getElementById('sc-name');
+        if (nameEl) nameEl.value = data.name || '';
+
+        // Sync button states
+        this.scSetMode(this._scMode);
+        this.scSetTheme(this._scTheme);
+        this._scRenderPreview();
+        this._scRenderSquads();
+        this._scSetStatus(`✅ Loaded "${data.name}"`);
+      } catch (err) {
+        this._scSetStatus('❌ Failed to load: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+    // Reset input so same file can be reloaded
+    event.target.value = '';
+  },
+
 };

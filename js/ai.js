@@ -20,17 +20,21 @@ class AIPlayer {
   }
 
   _chooseUnit(state, units) {
-    // Priority: unit with a target > unit near enemies > other
     let best = null, bestScore = -Infinity;
     for (const u of units) {
-      const targets = state.getValidTargets(u);
+      const targets     = state.getValidTargets(u);
       const nearestDist = this._nearestEnemyDist(state, u);
+      const inCover     = this._isInCover(state, u.x, u.y);
       let score = 0;
-      if (targets.length)         score += 100 - nearestDist;
+
+      if (targets.length)       score += 100 - nearestDist;  // has a shot
       if (u.ability === 'sniper') score += 20;
-      if (u.ability === 'grenadier' && targets.length) score += 30;
-      if (u.ability === 'command') score -= 10; // save leader
-      score += Math.random() * 10;
+      if (u.ability === 'blast' && targets.length) score += 30;
+      if (u.ability === 'command') score -= 8;                // activate leader last
+      if (u.suppressed)          score -= 20;                 // suppressed = deprioritise
+      if (!inCover && nearestDist <= 8) score += 15;          // exposed unit near enemies needs attention
+      if (inCover && !targets.length)   score -= 5;           // safe unit in cover is less urgent
+      score += Math.random() * 8;
       if (score > bestScore) { bestScore = score; best = u; }
     }
     return best || units[0];
@@ -111,14 +115,16 @@ class AIPlayer {
       }
     }
 
-    // If actions left and in cover: take cover (but reserve 1 action for medic heal)
-    // FIX #4: Previously the cover action could consume the last action before
-    // the medic check ran, leaving actionsLeft at 0 and silently dropping the
-    // heal. Now we only take cover if we won't need that action for healing.
+    // Take cover if standing on a cover tile and have an action left.
+    // Reserve the action for medic heal if needed.
     const medicNeedsAction = unit.ability === 'heal'
       && !state.revivedUnits.has(unit.id)
       && this._findHealTarget(state, unit) !== null;
-    if (actionsLeft >= 1 && this._isInCover(state, simX, simY) && !(actionsLeft === 1 && medicNeedsAction)) {
+    const shouldCover = actionsLeft >= 1
+      && this._isInCover(state, simX, simY)
+      && !unit.inCover                          // avoid wasting action if already in cover
+      && !(actionsLeft === 1 && medicNeedsAction);
+    if (shouldCover) {
       actions.push({ type: 'cover', unitId: unit.id });
       actionsLeft--;
     }
@@ -170,10 +176,10 @@ class AIPlayer {
   }
 
   _bestMovePosition(state, unit) {
-    const enemies   = state.units.filter(u => u.alive && u.team !== this.team);
+    const enemies = state.units.filter(u => u.alive && u.team !== this.team);
     if (!enemies.length) return null;
 
-    // Find nearest enemy
+    // Find nearest enemy and the most dangerous enemy (most shots at us)
     let nearestEnemy = null, minDist = Infinity;
     for (const e of enemies) {
       const d = Math.abs(unit.x - e.x) + Math.abs(unit.y - e.y);
@@ -181,16 +187,46 @@ class AIPlayer {
     }
     if (!nearestEnemy) return null;
 
-    // Get sprint range and pick tile closest to enemy that is also cover or close shot
-    const range = state.getMovementRange(unit, minDist > unit.move * 2 ? true : false);
+    // Determine how exposed the unit currently is (how many enemies can target it)
+    const currentlyExposed = enemies.filter(e =>
+      state.hasLOS(e.x, e.y, unit.x, unit.y) &&
+      Math.max(Math.abs(e.x - unit.x), Math.abs(e.y - unit.y)) <= e.range
+    ).length;
+    const alreadyInCover = this._isInCover(state, unit.x, unit.y);
+
+    // Use sprint if far from enemies AND not already in cover; walk if close or in cover
+    const useSprint = minDist > unit.move * 2 && !alreadyInCover;
+    const range = state.getMovementRange(unit, useSprint);
     if (!range.length) return null;
 
     let bestTile = null, bestScore = -Infinity;
     for (const tile of range) {
-      const distToEnemy = Math.abs(tile.x - nearestEnemy.x) + Math.abs(tile.y - nearestEnemy.y);
-      const inCover     = this._isInCover(state, tile.x, tile.y) ? 5 : 0;
-      const inRange     = distToEnemy <= unit.range ? 10 : 0;
-      const score       = -distToEnemy + inCover + inRange + Math.random();
+      const distToNearest = Math.abs(tile.x - nearestEnemy.x) + Math.abs(tile.y - nearestEnemy.y);
+      const inCover       = this._isInCover(state, tile.x, tile.y);
+
+      // Count how many enemies could shoot us from this tile (exposure)
+      const exposure = enemies.filter(e =>
+        state.hasLOS(e.x, e.y, tile.x, tile.y) &&
+        Math.max(Math.abs(e.x - tile.x), Math.abs(e.y - tile.y)) <= e.range
+      ).length;
+
+      const inShotRange   = distToNearest <= unit.range;
+      const hasLOSToEnemy = state.hasLOS(tile.x, tile.y, nearestEnemy.x, nearestEnemy.y);
+
+      // Scoring: strongly prefer cover, strongly avoid exposure
+      let score = 0;
+      score -= distToNearest * 1.5;        // closer to enemy is better
+      score += inCover ? 18 : 0;           // cover is very valuable
+      score -= exposure * 12;              // each additional shooter is costly
+      score += inShotRange ? 10 : 0;       // can shoot from here
+      score += hasLOSToEnemy ? 5 : 0;      // can see an enemy
+      score += Math.random() * 3;          // small tiebreaker
+
+      // Scouts get extra bonus for staying hidden in cover
+      if (unit.ability === 'stealth' && inCover) score += 10;
+      // Snipers want range — penalise getting too close
+      if (unit.ability === 'overwatch' && distToNearest < 6) score -= 8;
+
       if (score > bestScore) { bestScore = score; bestTile = tile; }
     }
     return bestTile;

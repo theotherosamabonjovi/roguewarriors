@@ -27,11 +27,114 @@
       <button class="btn-primary" onclick="UI.startMode('ai')">⚔️ &nbsp;vs AI Opponent</button>
       <button class="btn-primary" onclick="UI.startMode('local')">🎯 &nbsp;Local 2-Player</button>
       <button class="btn-primary" onclick="UI.startMode('online')">🌐 &nbsp;Online Multiplayer</button>
+      <button class="btn-primary" onclick="UI.showScenarioEditor()">🗺️ &nbsp;Scenario Editor</button>
       <button class="btn-secondary" onclick="UI.showHowToPlay()">📖 &nbsp;How to Play</button>
     </div>
     <p style="color:var(--text2); font-size:12px; margin-top:8px;">
       Based on <em>Rogue Warriors: A Modern Warfare Skirmish Game</em>
     </p>
+  </div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────
+     SCREEN: SCENARIO EDITOR
+──────────────────────────────────────────────────────────────── -->
+<div id="screen-scenario" class="screen" style="justify-content:center; align-items:flex-start; padding:20px; overflow:auto;">
+  <div style="width:min(960px,100%); display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <button class="btn-back" onclick="UI.showScreen('screen-menu')">← Back</button>
+      <h2>🗺️ Scenario Editor</h2>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+
+      <!-- LEFT: Map + settings -->
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <div class="control-group">
+          <div class="control-label">Scenario Name</div>
+          <input id="sc-name" type="text" class="code-input" placeholder="My Scenario" style="width:100%; box-sizing:border-box;">
+        </div>
+
+        <div class="control-group">
+          <div class="control-label">Game Mode</div>
+          <div class="btn-group" style="flex-wrap:wrap;">
+            <button class="gamemode-btn active" data-sc-mode="elimination" onclick="UI.scSetMode('elimination')">💀 Elimination</button>
+            <button class="gamemode-btn" data-sc-mode="ctf"          onclick="UI.scSetMode('ctf')">🚩 CTF</button>
+            <button class="gamemode-btn" data-sc-mode="bomb"         onclick="UI.scSetMode('bomb')">💣 Bomb</button>
+            <button class="gamemode-btn" data-sc-mode="vip"          onclick="UI.scSetMode('vip')">👑 VIP</button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <div class="control-label">Terrain Theme</div>
+          <div class="btn-group">
+            <button class="theme-btn active" data-sc-theme="urban"  onclick="UI.scSetTheme('urban')">🏙️ Urban</button>
+            <button class="theme-btn" data-sc-theme="desert"        onclick="UI.scSetTheme('desert')">🏜️ Desert</button>
+            <button class="theme-btn" data-sc-theme="arctic"        onclick="UI.scSetTheme('arctic')">❄️ Arctic</button>
+            <button class="theme-btn" data-sc-theme="forest"        onclick="UI.scSetTheme('forest')">🌲 Forest</button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <div class="control-label">Map</div>
+          <div class="btn-group">
+            <button class="reroll-btn" onclick="UI.scRerollMap()">🎲 Random Map</button>
+            <button class="reroll-btn" onclick="UI.scOpenMapEditor()">✏️ Edit Map</button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <div class="panel-title" style="margin-bottom:6px;">Map Preview</div>
+          <canvas id="sc-preview" style="border:2px solid var(--border); border-radius:6px; display:block;"></canvas>
+        </div>
+      </div>
+
+      <!-- RIGHT: Squad builders -->
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <div class="control-group">
+          <div class="control-label" style="color:#3a9eff;">🔵 Alpha Team Squad</div>
+          <div id="sc-squad-0" style="display:flex; flex-wrap:wrap; gap:6px; min-height:40px; padding:6px; background:var(--bg3); border-radius:6px;"></div>
+          <div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:6px;">
+            <button class="density-btn" onclick="UI.scAddUnit(0,'rifleman')">🔫 Rifleman</button>
+            <button class="density-btn" onclick="UI.scAddUnit(0,'sniper')">🎯 Sniper</button>
+            <button class="density-btn" onclick="UI.scAddUnit(0,'medic')">💉 Medic</button>
+            <button class="density-btn" onclick="UI.scAddUnit(0,'grenadier')">💣 Grenadier</button>
+            <button class="density-btn" onclick="UI.scAddUnit(0,'leader')">⭐ Leader</button>
+            <button class="density-btn" onclick="UI.scAddUnit(0,'scout')">🏹 Scout</button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <div class="control-label" style="color:#ff4545;">🔴 Bravo Team Squad</div>
+          <div id="sc-squad-1" style="display:flex; flex-wrap:wrap; gap:6px; min-height:40px; padding:6px; background:var(--bg3); border-radius:6px;"></div>
+          <div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:6px;">
+            <button class="density-btn" onclick="UI.scAddUnit(1,'rifleman')">🔫 Rifleman</button>
+            <button class="density-btn" onclick="UI.scAddUnit(1,'sniper')">🎯 Sniper</button>
+            <button class="density-btn" onclick="UI.scAddUnit(1,'medic')">💉 Medic</button>
+            <button class="density-btn" onclick="UI.scAddUnit(1,'grenadier')">💣 Grenadier</button>
+            <button class="density-btn" onclick="UI.scAddUnit(1,'leader')">⭐ Leader</button>
+            <button class="density-btn" onclick="UI.scAddUnit(1,'scout')">🏹 Scout</button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <div class="control-label">Actions</div>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button class="btn btn-green" onclick="UI.scPlayScenario()">⚔️ Play Scenario</button>
+              <button class="btn btn-blue"  onclick="UI.scSave()">💾 Save to File</button>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <label class="btn btn-ghost" style="cursor:pointer;">
+                📂 Load from File
+                <input type="file" accept=".json" style="display:none;" onchange="UI.scLoad(event)">
+              </label>
+            </div>
+            <div id="sc-status" style="font-size:12px; color:var(--text2); min-height:16px;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
