@@ -474,9 +474,10 @@ const UI = {
     const title  = document.getElementById('deploy-panel-title');
     const icons  = { rifleman:'🔫', sniper:'🎯', medic:'💉', grenadier:'💣', leader:'⭐', scout:'🏹' };
 
+    if (!panel) return;   // HUD not ready yet
+
     const color = team === 0 ? '#3a9eff' : '#ff4545';
-    title.textContent = `PLACE ${state.players[team].name.toUpperCase()}`;
-    title.style.color = color;
+    if (title) { title.textContent = `PLACE ${state.players[team].name.toUpperCase()}`; title.style.color = color; }
 
     const units = state.units.filter(u => u.team === team);
     panel.innerHTML = '';
@@ -1965,6 +1966,7 @@ const UI = {
         // Show deploy UI
         const title = document.createElement('div');
         title.className = 'panel-title';
+        title.id = 'deploy-panel-title';
         title.textContent = document.getElementById('deploy-panel-title')?.textContent || 'DEPLOY';
         const inst = document.createElement('div');
         inst.className = 'deploy-instructions';
