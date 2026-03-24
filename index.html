@@ -449,6 +449,16 @@
     </div>
   </div>
 
+  <!-- Mobile HUD (hidden on desktop via CSS) -->
+  <div id="mobile-hud" style="display:none;">
+    <div id="mobile-hud-tabs">
+      <button class="mob-tab active" onclick="UI.mobTab('actions')" id="mob-tab-actions">⚔️ Actions</button>
+      <button class="mob-tab"        onclick="UI.mobTab('teams')"   id="mob-tab-teams">👥 Teams</button>
+      <button class="mob-tab"        onclick="UI.mobTab('log')"     id="mob-tab-log">🎲 Log</button>
+    </div>
+    <div id="mobile-hud-content"></div>
+  </div>
+
   <!-- In-Game Menu Overlay -->
   <div id="game-menu-overlay">
     <div class="game-menu-card">

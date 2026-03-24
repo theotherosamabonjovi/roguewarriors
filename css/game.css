@@ -614,3 +614,233 @@ h2 { font-size: 24px; font-weight: 700; letter-spacing: 2px; }
   .side-panel { width: 130px; }
   #screen-game { font-size: 12px; }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   MOBILE RESPONSIVE OVERHAUL
+   Target: phones 360-480px wide (portrait) and tablets 481-768px
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Shared mobile utilities ─────────────────────────────── */
+@media (max-width: 768px) {
+  h2 { font-size: 18px; letter-spacing: 1px; }
+
+  /* Touch targets: all buttons at least 44px tall */
+  .btn, .btn-primary, .btn-secondary, .action-btn,
+  .theme-btn, .density-btn, .gamemode-btn, .reroll-btn,
+  .deploy-done-btn, .editor-brush-btn {
+    min-height: 44px;
+    font-size: 13px;
+  }
+  .action-btn { padding: 10px 12px; }
+}
+
+/* ── Main menu ───────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .menu-container { gap: 24px; padding: 20px; }
+  .logo h1 { font-size: clamp(26px, 10vw, 44px); letter-spacing: 4px; }
+  .logo .subtitle { font-size: 10px; letter-spacing: 3px; }
+  .menu-buttons { width: 100%; max-width: 320px; gap: 10px; }
+  .btn-primary, .btn-secondary {
+    padding: 16px 20px;
+    font-size: 14px;
+    letter-spacing: 1px;
+  }
+}
+
+/* ── Army builder ────────────────────────────────────────── */
+@media (max-width: 600px) {
+  #screen-army { padding: 12px; }
+  .army-container { gap: 12px; }
+  .army-header { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .unit-catalogue {
+    grid-template-columns: 1fr;   /* single column on small phones */
+  }
+  .unit-card { padding: 10px; }
+  .uc-name { font-size: 14px; }
+  .army-actions { justify-content: stretch; }
+  .army-actions .btn { flex: 1; text-align: center; }
+}
+@media (min-width: 601px) and (max-width: 768px) {
+  .unit-catalogue { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── Battlefield setup ───────────────────────────────────── */
+@media (max-width: 680px) {
+  #screen-battlefield { padding: 12px; }
+  .battlefield-container {
+    flex-direction: column;
+    gap: 16px;
+  }
+  .bf-controls { min-width: unset; }
+  .bf-preview { width: 100%; align-items: flex-start; }
+  #preview-canvas { max-width: 100%; }
+  .btn-group { flex-wrap: wrap; gap: 6px; }
+  .gamemode-btn, .theme-btn, .density-btn { font-size: 12px; padding: 8px 10px; }
+}
+
+/* ── Game screen — the big one ───────────────────────────── */
+@media (max-width: 768px) {
+  #screen-game { overflow: hidden; }
+
+  /* Stack vertically: top-bar → canvas → bottom-drawer */
+  #game-layout {
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Hide the fixed side panels completely on mobile */
+  .side-panel { display: none !important; }
+
+  /* Canvas gets all remaining vertical space */
+  #game-center {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+  #battlefield-wrapper {
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* ── Mobile bottom HUD ───────────────────────────────────
+     Replaces the left + right panels. A compact strip at the
+     bottom containing: action buttons | unit info | log/dice  */
+  #mobile-hud {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg2);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+    max-height: 42vh;
+    overflow: hidden;
+  }
+
+  #mobile-hud-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .mob-tab {
+    flex: 1;
+    padding: 8px 4px;
+    background: var(--bg3);
+    border: none;
+    color: var(--text2);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    border-right: 1px solid var(--border);
+    transition: background 0.15s, color 0.15s;
+    text-align: center;
+  }
+  .mob-tab:last-child { border-right: none; }
+  .mob-tab.active { background: var(--bg); color: var(--text); }
+
+  #mobile-hud-content {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 6px 8px;
+  }
+
+  /* Deploy panel lives in a full-screen overlay on mobile */
+  #deploy-section.mobile-deploy-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 300;
+    background: var(--bg2);
+    display: flex !important;
+    flex-direction: column;
+    padding: 12px;
+    overflow-y: auto;
+  }
+  #deploy-panel {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+}
+
+/* Turn banner top bar */
+@media (max-width: 480px) {
+  .top-bar-spacer { display: none; }
+  .turn-banner { font-size: 11px; padding: 6px 8px; }
+  .game-menu-btn { padding: 0 10px; font-size: 12px; }
+}
+
+/* ── Action buttons on mobile: horizontal scrolling strip ── */
+@media (max-width: 768px) {
+  /* When rendered into #mobile-hud-content the action buttons
+     should flow in a compact two-column grid */
+  #action-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 5px;
+    padding: 0;
+  }
+  .action-btn { font-size: 12px; padding: 9px 8px; gap: 6px; }
+  .action-btn.end-btn { grid-column: span 2; }
+  .hint-text { grid-column: span 2; }
+}
+
+/* ── Team panels compact for mobile HUD ──────────────────── */
+@media (max-width: 768px) {
+  .team-panel-inner { max-height: none; padding: 4px; }
+  .unit-row { padding: 6px 6px; font-size: 12px; }
+  #dice-panel { max-height: none; }
+  #combat-log { max-height: none; font-size: 11px; }
+  .die { width: 24px; height: 24px; font-size: 12px; }
+}
+
+/* ── Game over card ──────────────────────────────────────── */
+@media (max-width: 480px) {
+  .go-card { padding: 32px 20px; border-radius: 12px; }
+  #go-title { font-size: 28px; letter-spacing: 2px; }
+  #go-subtitle { font-size: 14px; }
+  .gm-buttons { gap: 8px; }
+}
+
+/* ── Game menu modal ─────────────────────────────────────── */
+@media (max-width: 480px) {
+  .game-menu-card { padding: 28px 20px; min-width: unset; width: 90vw; }
+  .gm-title { font-size: 20px; }
+}
+
+/* ── Multiplayer lobby ───────────────────────────────────── */
+@media (max-width: 480px) {
+  .lobby-container { width: 100%; padding: 12px; }
+  .lobby-card { padding: 16px; }
+  #room-code-display { font-size: 18px; letter-spacing: 2px; }
+}
+
+/* ── Scenario editor ─────────────────────────────────────── */
+@media (max-width: 680px) {
+  #screen-scenario { padding: 12px; }
+  /* Two-column grid → single column */
+  #screen-scenario > div > div[style*="grid"] {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ── Map editor overlay ──────────────────────────────────── */
+@media (max-width: 600px) {
+  #map-editor-overlay {
+    gap: 8px;
+    padding: 8px;
+  }
+  .editor-brush-btn { padding: 8px 10px; font-size: 12px; }
+}
+
+/* ── How to play ─────────────────────────────────────────── */
+@media (max-width: 480px) {
+  #screen-howtoplay { padding: 16px 12px; }
+  .rules-content { padding: 16px; }
+}
+
+/* ── Prevent rubber-band scroll on iOS at the body level ─── */
+@supports (-webkit-touch-callout: none) {
+  html, body { position: fixed; overflow: hidden; width: 100%; height: 100%; }
+  .screen { height: 100dvh; }   /* dvh respects the iOS browser chrome */
+}
