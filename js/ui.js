@@ -228,9 +228,37 @@ const UI = {
     document.querySelectorAll('.gamemode-btn').forEach(b => b.classList.remove('active'));
     const btn = document.querySelector(`[data-gamemode="${gm}"]`);
     if (btn) btn.classList.add('active');
-    // Show fuse-length control only in bomb mode
+    // Show fuse-length and attacker-team controls only in bomb mode
     const fuseCtrl = document.getElementById('fuse-control');
     if (fuseCtrl) fuseCtrl.style.display = (gm === 'bomb') ? 'block' : 'none';
+    // Reset hint when leaving bomb mode
+    if (gm !== 'bomb') {
+      const hint = document.getElementById('deploy-hint');
+      if (hint) hint.textContent = '🔵 Alpha deploys left \u00a0|\u00a0 🔴 Bravo deploys right';
+    } else {
+      // Refresh hint for current attacker setting
+      this.setBombAttacker(this.bombAttackerTeam ?? 0);
+    }
+  },
+
+  setBombAttacker(team) {
+    this.bombAttackerTeam = team;
+    document.querySelectorAll('[data-attacker]').forEach(b => b.classList.remove('active'));
+    const btn = document.querySelector(`[data-attacker="${team}"]`);
+    if (btn) btn.classList.add('active');
+    // Update the deploy hint to reflect who is attacking/defending
+    const hint = document.getElementById('deploy-hint');
+    if (hint) {
+      if (this.gameMode === 'bomb') {
+        const attName = team === 0 ? '🔵 Alpha' : '🔴 Bravo';
+        const defName = team === 0 ? '🔴 Bravo' : '🔵 Alpha';
+        const attSide = team === 0 ? 'left' : 'right';
+        const defSide = team === 0 ? 'right' : 'left';
+        hint.textContent = `${attName} (Attackers) deploy ${attSide} — bomb spawns there | ${defName} (Defenders) deploy ${defSide} — sites spawn there`;
+      } else {
+        hint.textContent = '🔵 Alpha deploys left \u00a0|\u00a0 🔴 Bravo deploys right';
+      }
+    }
   },
 
   setBombFuse(n) {
@@ -374,8 +402,9 @@ const UI = {
     eng.players[0].squadDef = this.armyDraft[0];
     eng.players[1].squadDef = this.armyDraft[1];
     eng.mode           = this.mode;
-    eng.gameMode       = this.gameMode || 'elimination';
-    eng.bombFuseLength = this.bombFuseLength || 8;
+    eng.gameMode          = this.gameMode || 'elimination';
+    eng.bombFuseLength    = this.bombFuseLength || 8;
+    eng.bombAttackerTeam  = (this.bombAttackerTeam === 1) ? 1 : 0;
 
     this.engine   = eng;
     this.renderer = new Renderer('battlefield');
@@ -2278,6 +2307,7 @@ const UI = {
     scEng.mode           = 'ai';
     scEng.gameMode       = this._scMode;
     scEng.bombFuseLength = 8;
+    scEng.bombAttackerTeam = (this.bombAttackerTeam === 1) ? 1 : 0;
 
     // Inject directly — bypass renderBattlefieldPreview which would overwrite the board
     this._previewEngine = scEng;

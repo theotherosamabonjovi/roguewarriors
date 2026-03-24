@@ -46,9 +46,11 @@ class AIPlayer {
     // ── BOMB MODE LOGIC ─────────────────────────────────────────────────────
     if (state.gameMode === 'bomb') {
       const obj = state.objectives;
+      const attTeam = obj?.attackerTeam ?? 0;
+      const defTeam = obj?.defenderTeam ?? 1;
 
-      // DEFENDERS (team 1): defuse the bomb if it's planted
-      if (unit.team === 1 && obj && obj.bombPlanted) {
+      // DEFENDERS: defuse the bomb if it's planted
+      if (unit.team === defTeam && obj && obj.bombPlanted) {
         const site = obj.sites && obj.sites.find(s => s.id === obj.activeSite && !s.defused);
         if (site) {
           const dist = Math.abs(unit.x - site.x) + Math.abs(unit.y - site.y);
@@ -82,8 +84,8 @@ class AIPlayer {
         }
       }
 
-      // ATTACKERS (team 0): pick up bomb, then plant it
-      if (unit.team === 0 && obj && obj.bomb && !obj.bombPlanted) {
+      // ATTACKERS: pick up bomb, then plant it
+      if (unit.team === attTeam && obj && obj.bomb && !obj.bombPlanted) {
         const bombCarried = obj.bomb.carriedBy === unit.id;
         const bombFree    = obj.bomb.carriedBy === null;
 

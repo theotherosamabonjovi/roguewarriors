@@ -682,12 +682,25 @@ class Engine {
       this.addLog('🚩 Capture the Flag — grab the flag at centre and return it to your base!', 'system');
 
     } else if (this.gameMode === 'bomb') {
+      // Determine which team is attacking (default team 0 = left side)
+      const attTeam = (this.bombAttackerTeam === 1) ? 1 : 0;
+      const defTeam = 1 - attTeam;
+
+      // Attacker deploys left (cols 0-3) or right (cols COLS-4 to COLS-1)
+      const attLeft  = attTeam === 0;
+      // Bomb spawns in attacker deployment zone centre
+      const bombDefaultX = attLeft ? 2 : COLS - 3;
+      const bombDefaultY = Math.floor(ROWS / 2);
+      // Sites spawn in defender deployment zone (split top/bottom)
+      const defLeft  = !attLeft;
+      const siteBaseX = defLeft ? 2 : COLS - 3;
+
       const site1    = cus.site_a  ? this._nearestOpen(cus.site_a.x,  cus.site_a.y)
-                                   : this._nearestOpen(Math.floor(COLS * 0.35), Math.floor(ROWS * 0.3));
+                                   : this._nearestOpen(siteBaseX, Math.floor(ROWS * 0.25));
       const site2    = cus.site_b  ? this._nearestOpen(cus.site_b.x,  cus.site_b.y)
-                                   : this._nearestOpen(Math.floor(COLS * 0.65), Math.floor(ROWS * 0.7));
+                                   : this._nearestOpen(siteBaseX, Math.floor(ROWS * 0.75));
       const bombStart = cus.bomb   ? this._nearestOpen(cus.bomb.x,    cus.bomb.y)
-                                   : this._nearestOpen(cx, cy);
+                                   : this._nearestOpen(bombDefaultX,  bombDefaultY);
       const fuseLen = (this.bombFuseLength && this.bombFuseLength >= 1) ? this.bombFuseLength : 8;
       this.objectives = {
         sites: [
@@ -699,8 +712,12 @@ class Engine {
         bombTimer:   0,
         maxTimer:    fuseLen,
         activeSite:  null,
+        attackerTeam: attTeam,
+        defenderTeam: defTeam,
       };
-      this.addLog(`💣 Plant the Bomb — Attackers: pick up the bomb and carry it to a site. Defenders have ${fuseLen} rounds to defuse!`, 'system');
+      const attName = this.players[attTeam]?.name || `Team ${attTeam + 1}`;
+      const defName = this.players[defTeam]?.name || `Team ${defTeam + 1}`;
+      this.addLog(`💣 Plant the Bomb — ${attName} are Attackers. ${defName} have ${fuseLen} rounds to defuse!`, 'system');
 
     } else if (this.gameMode === 'vip') {
       const ex = cus.extract ? cus.extract.x : CFG.COLS - 2;
@@ -776,7 +793,8 @@ class Engine {
   // Bomb: pick up (attacker must carry it to a site before planting)
   tryPickupBomb(unit) {
     const obj = this.objectives;
-    if (!obj.bomb || unit.team !== 0) return false;          // only attackers
+    const attTeam = obj.attackerTeam ?? 0;
+    if (!obj.bomb || unit.team !== attTeam) return false;    // only attackers
     if (obj.bomb.carriedBy !== null) return false;            // already carried
     if (obj.bombPlanted) return false;                        // already planted
     if (unit.x !== obj.bomb.x || unit.y !== obj.bomb.y) return false;
@@ -798,7 +816,8 @@ class Engine {
   // Bomb: plant at a site (carrier must be standing on a site tile)
   tryPlantBomb(unit) {
     const obj = this.objectives;
-    if (!obj.sites || unit.team !== 0) return false;
+    const attTeam = obj.attackerTeam ?? 0;
+    if (!obj.sites || unit.team !== attTeam) return false;
     if (obj.bombPlanted) return false;
     if (!obj.bomb || obj.bomb.carriedBy !== unit.id) return false; // must be carrying
     const site = obj.sites.find(s => s.x === unit.x && s.y === unit.y && !s.planted);
@@ -815,7 +834,8 @@ class Engine {
   // Bomb: defuse
   tryDefuseBomb(unit) {
     const obj = this.objectives;
-    if (!obj.sites || unit.team !== 1) return false; // only defenders defuse
+    const defTeam = obj.defenderTeam ?? 1;
+    if (!obj.sites || unit.team !== defTeam) return false; // only defenders defuse
     if (!obj.bombPlanted) return false;
     const site = obj.sites.find(s => s.id === obj.activeSite);
     if (!site || site.defused) return false;
@@ -824,7 +844,7 @@ class Engine {
     obj.bombPlanted = false;
     this.addLog(`💣 ${unit.name} defuses the bomb! Defenders win!`, 'system');
     this.phase  = 'gameover';
-    this.winner = 1;
+    this.winner = defTeam;
     return true;
   }
 
@@ -835,8 +855,10 @@ class Engine {
     obj.bombTimer--;
     this.addLog(`💣 Bomb detonates in ${obj.bombTimer} round${obj.bombTimer !== 1 ? 's' : ''}!`, 'system');
     if (obj.bombTimer <= 0) {
+      const attTeam = obj.attackerTeam ?? 0;
       this.addLog(`💥 BOOM! The bomb explodes! Attackers win!`, 'system');
       this.phase  = 'gameover';
+      this.winner = attTeam;
       this.winner = 0;
     }
   }

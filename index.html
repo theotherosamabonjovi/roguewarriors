@@ -296,6 +296,11 @@
             <button class="density-btn" data-fuse="10" onclick="UI.setBombFuse(10)">10</button>
             <button class="density-btn" data-fuse="12" onclick="UI.setBombFuse(12)">12</button>
           </div>
+          <div class="control-label" style="margin-top:10px;">⚔️ Attacking Team (plants bomb)</div>
+          <div class="btn-group">
+            <button class="density-btn active" data-attacker="0" onclick="UI.setBombAttacker(0)">🔵 Alpha</button>
+            <button class="density-btn"        data-attacker="1" onclick="UI.setBombAttacker(1)">🔴 Bravo</button>
+          </div>
         </div>
 
         <div class="control-group">
@@ -316,7 +321,7 @@
       <div class="bf-preview">
         <div class="panel-title">MAP PREVIEW</div>
         <canvas id="preview-canvas" style="border:2px solid var(--border); border-radius:6px;"></canvas>
-        <p style="font-size:11px; color:var(--text2); margin-top:6px;">
+        <p style="font-size:11px; color:var(--text2); margin-top:6px;" id="deploy-hint">
           🔵 Alpha deploys left &nbsp;|&nbsp; 🔴 Bravo deploys right
         </p>
       </div>
