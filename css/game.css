@@ -665,24 +665,46 @@ h2 { font-size: 24px; font-weight: 700; letter-spacing: 2px; }
 
 /* ── Army builder ─────────────────────────────────────────── */
 @media (max-width: 768px) {
-  /* Screen is a flex-col that must fill the viewport and scroll */
+  /* Screen fills viewport; inner container scrolls, confirm button sticks to bottom */
   #screen-army {
     align-items: flex-start;
     padding: 0;
-    height: 100svh;
-    overflow-y: auto;
-    overflow-x: hidden;
-    -webkit-overflow-scrolling: touch;
+    height: 100dvh;
+    overflow: hidden;
   }
   .army-container {
     width: 100% !important;
     max-width: 100% !important;
     padding: 12px !important;
-    /* Let the screen handle scroll — container must not constrain height */
-    max-height: none !important;
-    overflow: visible !important;
-    /* Ensure confirm button at bottom is always reachable */
-    padding-bottom: 24px !important;
+    height: 100dvh;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+  }
+  /* The scrollable zone: header + squad list + catalogue */
+  .army-container > .army-header,
+  .army-container > .panel-title,
+  .army-container > #army-squad-list,
+  .army-container > .unit-catalogue {
+    flex-shrink: 0;
+  }
+  .army-container > .unit-catalogue {
+    flex: 1 1 auto !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* Confirm button container always visible at the bottom */
+  .army-actions {
+    flex-shrink: 0 !important;
+    margin-top: 0 !important;
+    padding: 10px 0 env(safe-area-inset-bottom, 12px) !important;
+    background: var(--bg1);
+    border-top: 1px solid var(--border);
+  }
+  #army-confirm-btn {
+    width: 100%;
+    padding: 16px !important;
+    font-size: 16px !important;
   }
   .army-header { flex-direction: column; gap: 6px; align-items: flex-start; }
   #army-player-title { font-size: 16px; }
@@ -724,13 +746,7 @@ h2 { font-size: 24px; font-weight: 700; letter-spacing: 2px; }
   .uc-ability { grid-column: 1 / 4; font-size: 11px; }
   .uc-desc    { display: none; } /* hide long desc on mobile to save space */
 
-  .army-actions {
-    flex-direction: column;
-    gap: 8px;
-    margin-top: 16px;
-    padding-bottom: 16px;
-  }
-  .army-actions .btn { width: 100%; text-align: center; padding: 14px; }
+  .army-actions .btn { text-align: center; }
 }
 
 /* ── Battlefield setup ────────────────────────────────────── */

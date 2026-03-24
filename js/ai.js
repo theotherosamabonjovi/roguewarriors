@@ -42,6 +42,126 @@ class AIPlayer {
 
   _planUnitActions(state, unit) {
     const actions = [];
+
+    // ── BOMB MODE LOGIC ─────────────────────────────────────────────────────
+    if (state.gameMode === 'bomb') {
+      const obj = state.objectives;
+
+      // DEFENDERS (team 1): defuse the bomb if it's planted
+      if (unit.team === 1 && obj && obj.bombPlanted) {
+        const site = obj.sites && obj.sites.find(s => s.id === obj.activeSite && !s.defused);
+        if (site) {
+          const dist = Math.abs(unit.x - site.x) + Math.abs(unit.y - site.y);
+          if (unit.x === site.x && unit.y === site.y) {
+            // Standing on the site — defuse immediately
+            actions.push({ type: 'defuse_bomb', unitId: unit.id });
+            actions.push({ type: 'end', unitId: unit.id });
+            return actions;
+          } else {
+            // Move toward the bomb site, using sprint if needed
+            const sprintRange = state.getMovementRange(unit, true);
+            const moveRange   = state.getMovementRange(unit, false);
+            // Pick the reachable tile closest to the site
+            const allRange = sprintRange.length ? sprintRange : moveRange;
+            let best = null, bestDist = Infinity;
+            for (const t of allRange) {
+              const d = Math.abs(t.x - site.x) + Math.abs(t.y - site.y);
+              if (d < bestDist) { bestDist = d; best = t; }
+            }
+            if (best) {
+              const canSprint = sprintRange.some(t => t.x === best.x && t.y === best.y);
+              actions.push({ type: canSprint ? 'sprint' : 'move', unitId: unit.id, x: best.x, y: best.y });
+              // If we'd land exactly on the site after moving, defuse too
+              if (best.x === site.x && best.y === site.y) {
+                actions.push({ type: 'defuse_bomb', unitId: unit.id });
+              }
+            }
+            actions.push({ type: 'end', unitId: unit.id });
+            return actions;
+          }
+        }
+      }
+
+      // ATTACKERS (team 0): pick up bomb, then plant it
+      if (unit.team === 0 && obj && obj.bomb && !obj.bombPlanted) {
+        const bombCarried = obj.bomb.carriedBy === unit.id;
+        const bombFree    = obj.bomb.carriedBy === null;
+
+        if (!bombCarried && bombFree) {
+          // Try to pick up bomb if standing on it
+          if (unit.x === obj.bomb.x && unit.y === obj.bomb.y) {
+            actions.push({ type: 'pickup_bomb', unitId: unit.id });
+            // After picking up, try to move toward nearest unplanted site
+            const site = obj.sites && obj.sites.find(s => !s.planted);
+            if (site) {
+              const moveRange = state.getMovementRange(unit, false);
+              let best = null, bestDist = Infinity;
+              for (const t of moveRange) {
+                const d = Math.abs(t.x - site.x) + Math.abs(t.y - site.y);
+                if (d < bestDist) { bestDist = d; best = t; }
+              }
+              if (best && !(best.x === unit.x && best.y === unit.y)) {
+                actions.push({ type: 'move', unitId: unit.id, x: best.x, y: best.y });
+              }
+            }
+            actions.push({ type: 'end', unitId: unit.id });
+            return actions;
+          } else {
+            // Move toward the bomb
+            const sprintRange = state.getMovementRange(unit, true);
+            const moveRange   = state.getMovementRange(unit, false);
+            const allRange = sprintRange.length ? sprintRange : moveRange;
+            let best = null, bestDist = Infinity;
+            for (const t of allRange) {
+              const d = Math.abs(t.x - obj.bomb.x) + Math.abs(t.y - obj.bomb.y);
+              if (d < bestDist) { bestDist = d; best = t; }
+            }
+            if (best) {
+              const canSprint = sprintRange.some(t => t.x === best.x && t.y === best.y);
+              actions.push({ type: canSprint ? 'sprint' : 'move', unitId: unit.id, x: best.x, y: best.y });
+              // If we move onto the bomb, pick it up too
+              if (best.x === obj.bomb.x && best.y === obj.bomb.y) {
+                actions.push({ type: 'pickup_bomb', unitId: unit.id });
+              }
+            }
+            actions.push({ type: 'end', unitId: unit.id });
+            return actions;
+          }
+        }
+
+        if (bombCarried) {
+          // Carrying the bomb — head to nearest unplanted site
+          const site = obj.sites && obj.sites.find(s => !s.planted);
+          if (site) {
+            if (unit.x === site.x && unit.y === site.y) {
+              // Plant it!
+              actions.push({ type: 'plant_bomb', unitId: unit.id });
+              actions.push({ type: 'end', unitId: unit.id });
+              return actions;
+            } else {
+              const sprintRange = state.getMovementRange(unit, true);
+              const moveRange   = state.getMovementRange(unit, false);
+              const allRange = sprintRange.length ? sprintRange : moveRange;
+              let best = null, bestDist = Infinity;
+              for (const t of allRange) {
+                const d = Math.abs(t.x - site.x) + Math.abs(t.y - site.y);
+                if (d < bestDist) { bestDist = d; best = t; }
+              }
+              if (best) {
+                const canSprint = sprintRange.some(t => t.x === best.x && t.y === best.y);
+                actions.push({ type: canSprint ? 'sprint' : 'move', unitId: unit.id, x: best.x, y: best.y });
+                if (best.x === site.x && best.y === site.y) {
+                  actions.push({ type: 'plant_bomb', unitId: unit.id });
+                }
+              }
+              actions.push({ type: 'end', unitId: unit.id });
+              return actions;
+            }
+          }
+        }
+      }
+    }
+    // ── END BOMB MODE LOGIC ─────────────────────────────────────────────────
     let actionsLeft = MAX_ACTIONS;
     let simX = unit.x, simY = unit.y;
     let hasMoved   = false;

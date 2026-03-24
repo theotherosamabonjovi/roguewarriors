@@ -1147,6 +1147,18 @@ const UI = {
         if (!state.getActiveUnit()) state.activateUnit(unit);
         if (unit) { unit.inCover = true; state.addLog(`🛡️ ${unit.name} takes cover!`, 'ability'); state.useAction(1); }
         break;
+      case 'pickup_bomb':
+        if (!state.getActiveUnit()) state.activateUnit(unit);
+        if (unit) { state.tryPickupBomb(unit); }
+        break;
+      case 'plant_bomb':
+        if (!state.getActiveUnit()) state.activateUnit(unit);
+        if (unit) { state.tryPlantBomb(unit); state.useAction(1); }
+        break;
+      case 'defuse_bomb':
+        if (!state.getActiveUnit()) state.activateUnit(unit);
+        if (unit) { state.tryDefuseBomb(unit); state.useAction(1); }
+        break;
       case 'end':
         if (!state.getActiveUnit() && unit) state.activateUnit(unit);
         state.endActivation();
