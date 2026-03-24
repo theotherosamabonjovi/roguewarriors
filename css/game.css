@@ -751,22 +751,26 @@ h2 { font-size: 24px; font-weight: 700; letter-spacing: 2px; }
 
 /* ── Battlefield setup ────────────────────────────────────── */
 @media (max-width: 680px) {
+  /* Override the inline padding/alignment on the screen itself */
   #screen-battlefield {
-    align-items: flex-start;
-    padding: 0;
-    height: 100dvh;
-    overflow: hidden;
+    padding: 0 !important;
+    align-items: flex-start !important;
+    justify-content: flex-start !important;
+    height: 100dvh !important;
+    overflow: hidden !important;
     display: flex !important;
     flex-direction: column !important;
   }
+  /* The direct child div (inline max-height:100vh; overflow:auto) — let it fill and scroll */
   #screen-battlefield > div {
     flex: 1 !important;
     width: 100% !important;
     max-height: none !important;
+    height: auto !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
     -webkit-overflow-scrolling: touch;
-    padding: 12px !important;
+    padding: 12px 12px 32px !important;
     box-sizing: border-box !important;
   }
   .battlefield-container { flex-direction: column; gap: 12px; }
