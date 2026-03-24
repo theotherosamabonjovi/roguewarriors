@@ -2013,29 +2013,118 @@ const UI = {
   },
 
   // Touch support — distinguishes tap from scroll on the canvas
+  // ── Map zoom level (1.0 = 100%) ───────────────────────────
+  _mapZoom: 1.0,
+
+  _applyMapZoom() {
+    const canvas  = document.getElementById('battlefield');
+    const wrapper = document.getElementById('battlefield-wrapper');
+    if (!canvas || !wrapper) return;
+
+    const z = this._mapZoom;
+    canvas.style.transform = `scale(${z})`;
+    // Keep wrapper scrollable area in sync: the canvas occupies
+    // its natural pixel size * zoom factor visually, but since
+    // transform doesn't affect layout flow we need a spacer div.
+    let spacer = wrapper.querySelector('.zoom-spacer');
+    if (!spacer) {
+      spacer = document.createElement('div');
+      spacer.className = 'zoom-spacer';
+      spacer.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;';
+      wrapper.style.position = 'relative';
+      wrapper.appendChild(spacer);
+    }
+    spacer.style.width  = (canvas.width  * z) + 'px';
+    spacer.style.height = (canvas.height * z) + 'px';
+  },
+
+  mapZoom(dir) {
+    const STEPS = [0.4, 0.5, 0.6, 0.75, 1.0, 1.25, 1.5, 2.0];
+    let idx = STEPS.findIndex(s => s >= this._mapZoom - 0.01);
+    if (idx < 0) idx = STEPS.length - 1;
+    idx = Math.max(0, Math.min(STEPS.length - 1, idx + dir));
+    this._mapZoom = STEPS[idx];
+    this._applyMapZoom();
+  },
+
   _setupTouchCanvas() {
-    const canvas = document.getElementById('battlefield');
+    const canvas  = document.getElementById('battlefield');
+    const wrapper = document.getElementById('battlefield-wrapper');
     if (!canvas || canvas._touchReady) return;
     canvas._touchReady = true;
 
+    // Apply initial zoom so spacer is created
+    this._applyMapZoom();
+
+    // ── Pinch-zoom state ────────────────────────────────────
+    let _pinchActive   = false;
+    let _pinchDist0    = 0;
+    let _pinchZoom0    = 1.0;
+    // Midpoint of the pinch in wrapper-scroll space (for re-centering)
+    let _pinchMidWX    = 0;
+    let _pinchMidWY    = 0;
+
+    const _touchDist = (t1, t2) => {
+      const dx = t1.clientX - t2.clientX;
+      const dy = t1.clientY - t2.clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    };
+
+    // ── touchstart ─────────────────────────────────────────
     canvas.addEventListener('touchstart', (e) => {
-      const touch = e.changedTouches[0];
-      this._touchStartX = touch.clientX;
-      this._touchStartY = touch.clientY;
-      this._touchMoved  = false;
-    }, { passive: true });
+      if (e.touches.length === 2) {
+        // Begin pinch
+        _pinchActive = true;
+        this._touchMoved = true;  // suppress tap
+        _pinchDist0  = _touchDist(e.touches[0], e.touches[1]);
+        _pinchZoom0  = this._mapZoom;
+        // midpoint in viewport space
+        const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const my = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        const wr = wrapper.getBoundingClientRect();
+        _pinchMidWX = mx - wr.left + wrapper.scrollLeft;
+        _pinchMidWY = my - wr.top  + wrapper.scrollTop;
+        e.preventDefault();
+      } else {
+        _pinchActive = false;
+        const touch = e.changedTouches[0];
+        this._touchStartX = touch.clientX;
+        this._touchStartY = touch.clientY;
+        this._touchMoved  = false;
+      }
+    }, { passive: false });
 
-    canvas.addEventListener('touchmove', () => {
-      this._touchMoved = true;
-    }, { passive: true });
+    // ── touchmove ──────────────────────────────────────────
+    canvas.addEventListener('touchmove', (e) => {
+      if (_pinchActive && e.touches.length === 2) {
+        e.preventDefault();
+        const dist   = _touchDist(e.touches[0], e.touches[1]);
+        const STEPS  = [0.4, 0.5, 0.6, 0.75, 1.0, 1.25, 1.5, 2.0];
+        let raw      = _pinchZoom0 * (dist / _pinchDist0);
+        raw          = Math.max(STEPS[0], Math.min(STEPS[STEPS.length - 1], raw));
+        // Snap to nearest step
+        this._mapZoom = STEPS.reduce((a, b) => Math.abs(b - raw) < Math.abs(a - raw) ? b : a);
+        this._applyMapZoom();
+        // Re-anchor scroll so the pinch midpoint stays fixed on screen
+        const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const my = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        const wr = wrapper.getBoundingClientRect();
+        wrapper.scrollLeft = _pinchMidWX - (mx - wr.left);
+        wrapper.scrollTop  = _pinchMidWY - (my - wr.top);
+      } else {
+        this._touchMoved = true;
+      }
+    }, { passive: false });
 
+    // ── touchend ───────────────────────────────────────────
     canvas.addEventListener('touchend', (e) => {
+      if (e.touches.length < 2) _pinchActive = false;
       if (this._touchMoved) return;
       e.preventDefault();
       const touch = e.changedTouches[0];
       canvas.dispatchEvent(new MouseEvent('click', {
         clientX: touch.clientX, clientY: touch.clientY,
-        bubbles: true, cancelable: true
+        bubbles: true, cancelable: true,
       }));
     }, { passive: false });
   },

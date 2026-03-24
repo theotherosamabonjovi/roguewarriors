@@ -753,21 +753,29 @@ h2 { font-size: 24px; font-weight: 700; letter-spacing: 2px; }
 @media (max-width: 680px) {
   #screen-battlefield {
     align-items: flex-start;
-    padding: 12px;
-    height: 100svh;
-    overflow-y: auto;
-    overflow-x: hidden;
-    -webkit-overflow-scrolling: touch;
+    padding: 0;
+    height: 100dvh;
+    overflow: hidden;
+    display: flex !important;
+    flex-direction: column !important;
   }
   #screen-battlefield > div {
-    max-height: none !important;
+    flex: 1 !important;
     width: 100% !important;
+    max-height: none !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch;
+    padding: 12px !important;
+    box-sizing: border-box !important;
   }
-  .battlefield-container { flex-direction: column; gap: 16px; }
-  .bf-controls { min-width: unset; }
+  .battlefield-container { flex-direction: column; gap: 12px; }
+  .bf-controls { min-width: unset; width: 100%; }
   .bf-preview  { width: 100%; }
   #preview-canvas { max-width: 100%; height: auto; }
   .gamemode-btn { font-size: 12px; padding: 8px 10px; }
+  #fuse-control { padding-bottom: 8px; }
+  #fuse-control .btn-group { flex-wrap: wrap; }
 }
 
 /* ── Game screen ──────────────────────────────────────────── */
@@ -798,9 +806,43 @@ h2 { font-size: 24px; font-weight: 700; letter-spacing: 2px; }
   #battlefield-wrapper {
     width: 100%;
     height: 100%;
-    overflow: scroll;
+    overflow: auto;
     -webkit-overflow-scrolling: touch;
+    /* prevent rubber-band interfering with pinch */
+    overscroll-behavior: contain;
   }
+  /* Canvas scales via JS transform; origin top-left so it expands into scroll area */
+  #battlefield {
+    display: block;
+    transform-origin: top left;
+  }
+  /* Zoom controls overlay */
+  #map-zoom-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    position: absolute;
+    bottom: 12px;
+    right: 12px;
+    z-index: 50;
+  }
+  .map-zoom-btn {
+    width: 38px;
+    height: 38px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg2);
+    color: var(--text);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .map-zoom-btn:active { background: var(--bg3); }
 
   /* Show the mobile HUD */
   #mobile-hud {
@@ -919,4 +961,10 @@ h2 { font-size: 24px; font-weight: 700; letter-spacing: 2px; }
 @supports (padding: env(safe-area-inset-bottom)) {
   #mobile-hud { padding-bottom: env(safe-area-inset-bottom); }
   #screen-menu .menu-container { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+}
+
+/* ── Zoom controls (mobile only) ─────────────────────────── */
+#map-zoom-controls { display: none; }
+@media (max-width: 768px) {
+  #map-zoom-controls { display: flex; }
 }

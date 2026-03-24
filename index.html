@@ -429,6 +429,11 @@
       <div id="battlefield-wrapper">
         <canvas id="battlefield"></canvas>
       </div>
+      <!-- Zoom controls — visible on mobile, hidden on desktop via CSS -->
+      <div id="map-zoom-controls">
+        <button class="map-zoom-btn" onclick="UI.mapZoom(1)" title="Zoom in">+</button>
+        <button class="map-zoom-btn" onclick="UI.mapZoom(-1)" title="Zoom out">−</button>
+      </div>
     </div>
 
     <!-- RIGHT PANEL: Teams + Dice + Log -->
