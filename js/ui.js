@@ -413,10 +413,10 @@ const UI = {
     this.showScreen('screen-game');
     this._setupGameCanvas();
     this.startRenderLoop();
-    this._mobSetupHUD();
 
     if (this.mode === 'online') {
       this.renderer._onlineMyTeam = this.myTeam;
+      this._mobSetupHUD();
 
       if (this.mp?.isHost) {
         // HOST: generate the authoritative engine, start deploy, then broadcast.
@@ -439,9 +439,10 @@ const UI = {
         this._syncOnline({ type: 'requestInit' });
       }
     } else {
-      // AI / local: start deploy immediately
+      // AI / local: start deploy first so phase === 'deploy' when HUD builds
       eng.startDeploy();
       this._enterDeployPhase();
+      this._mobSetupHUD();
     }
   },
 
@@ -465,6 +466,9 @@ const UI = {
     // Show deploy zone highlights for the local player's team only
     this.renderer.deployHighlights = state.deployZone(deployTeam);
     this._deploySelectedUnit = null;
+
+    // On mobile the HUD may already be built — refresh it so the deploy panel appears
+    if (this._isMobile()) this.mobTab('actions');
   },
 
   _renderDeployPanel(team) {
