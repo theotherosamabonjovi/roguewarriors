@@ -26,6 +26,9 @@ const UI = {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.getElementById(id).classList.add('active');
     this.phase = id.replace('screen-', '');
+    // Hide mobile HUD when leaving the game screen
+    const hud = document.getElementById('mobile-hud');
+    if (hud) hud.style.display = (id === 'screen-game') ? '' : 'none';
   },
 
   showNotif(msg, type = 'info') {
@@ -1424,7 +1427,9 @@ const UI = {
     this._updateActionButtons(this.engine?.getActiveUnit());
     this._updateTeamPanels();
     this._updateLog();
-    if (this._isMobile()) this.mobTab(this._mobCurrentTab);
+    // On mobile the panels live inside the HUD — no reparent needed,
+    // the update calls above already wrote to whatever #action-buttons,
+    // #team-panel-0 etc. are currently in the DOM (desktop or mobile).
   },
 
   _updateTurnBanner() {
@@ -1882,139 +1887,115 @@ const UI = {
 
   // ─── Mobile HUD ──────────────────────────────────────────
   _isMobile() {
-    return window.matchMedia('(max-width: 768px)').matches;
+    return window.innerWidth <= 768;
   },
 
   _mobCurrentTab: 'actions',
 
-  // Called after startGame and after every _updateAllPanels in mobile
+  // Called after startGame. Moves the real DOM panels into the HUD
+  // so onclick handlers stay wired — no cloning needed.
   _mobSetupHUD() {
     if (!this._isMobile()) return;
-    const hud = document.getElementById('mobile-hud');
-    if (hud) hud.style.display = 'flex';
-    // Move deploy-section out of side-panel into full-screen overlay style
-    const deploySection = document.getElementById('deploy-section');
-    if (deploySection) deploySection.classList.add('mobile-deploy-overlay');
-    this.mobTab(this._mobCurrentTab);
+    // Reparent action/deploy/team/log panels into the HUD content area
+    // We do this by showing the HUD and pointing _updateAllPanels output
+    // at the HUD content. The actual panels (#action-buttons etc.) remain
+    // in the DOM but are now inside #mobile-hud-content for the active tab.
+    this.mobTab('actions');
   },
 
   mobTab(tab) {
     this._mobCurrentTab = tab;
-    // Update tab highlight
+    if (!this._isMobile()) return;
+
     ['actions','teams','log'].forEach(t => {
       const btn = document.getElementById('mob-tab-' + t);
       if (btn) btn.classList.toggle('active', t === tab);
     });
-    const content = document.getElementById('mobile-hud-content');
-    if (!content) return;
-    content.innerHTML = '';
+
+    const hud = document.getElementById('mobile-hud-content');
+    if (!hud) return;
+    // Clear
+    hud.innerHTML = '';
 
     const state = this.engine;
 
     if (tab === 'actions') {
-      // Clone the actions panel or deploy panel into the HUD
-      const phase = state?.phase;
-      if (phase === 'deploy') {
-        const src = document.getElementById('deploy-panel');
+      if (state?.phase === 'deploy') {
+        // Show deploy UI
         const title = document.createElement('div');
         title.className = 'panel-title';
-        title.id = 'mob-deploy-title';
         title.textContent = document.getElementById('deploy-panel-title')?.textContent || 'DEPLOY';
-        const instructions = document.createElement('div');
-        instructions.className = 'deploy-instructions';
-        instructions.textContent = 'Click a unit below, then click a highlighted tile on the map.';
-        const cloned = src ? src.cloneNode(true) : document.createElement('div');
-        cloned.id = 'mob-deploy-panel';
-        // Re-wire click events lost in cloneNode
-        if (src) {
-          cloned.querySelectorAll('[data-uid]').forEach((card, i) => {
-            const orig = src.querySelectorAll('[data-uid]')[i];
-            card.onclick = orig ? orig.onclick : null;
-          });
-        }
+        const inst = document.createElement('div');
+        inst.className = 'deploy-instructions';
+        inst.textContent = 'Tap a unit, then tap a highlighted tile on the map.';
+        // Re-render a fresh deploy panel inside HUD
+        const dp = document.createElement('div');
+        dp.id = 'deploy-panel';
         const doneBtn = document.createElement('button');
         doneBtn.className = 'deploy-done-btn';
-        doneBtn.textContent = document.getElementById('deploy-done-btn')?.textContent || '✅ Done Deploying';
-        doneBtn.disabled = document.getElementById('deploy-done-btn')?.disabled ?? true;
+        doneBtn.id = 'deploy-done-btn';
         doneBtn.onclick = () => UI.finishDeployment();
-        content.append(title, instructions, cloned, doneBtn);
+        hud.append(title, inst, dp, doneBtn);
+        // Now re-render deploy panel into the new element
+        if (state) this._renderDeployPanel(this.myTeam ?? state.deployingTeam ?? 0);
       } else {
-        const src = document.getElementById('action-buttons');
-        if (src) {
-          const clone = src.cloneNode(true);
-          clone.id = 'mob-action-buttons';
-          // Re-wire onclick handlers for buttons
-          clone.querySelectorAll('button').forEach((btn, i) => {
-            const orig = src.querySelectorAll('button')[i];
-            if (orig) btn.onclick = orig.onclick;
-          });
-          content.appendChild(clone);
-        }
+        const wrap = document.createElement('div');
+        wrap.id = 'action-buttons';
+        hud.appendChild(wrap);
+        if (state) this._updateActionButtons(state.getActiveUnit());
       }
     } else if (tab === 'teams') {
-      // Clone both team panels
       ['0','1'].forEach(t => {
-        const header = document.createElement('div');
-        header.className = 'panel-title';
-        header.style.color = t === '0' ? '#3a9eff' : '#ff4545';
-        header.textContent = t === '0' ? '🔵 ALPHA TEAM' : '🔴 BRAVO TEAM';
-        const src = document.getElementById('team-panel-' + t);
-        const clone = src ? src.cloneNode(true) : document.createElement('div');
-        clone.id = 'mob-team-' + t;
-        content.append(header, clone);
+        const h = document.createElement('div');
+        h.className = 'panel-title';
+        h.style.color = t === '0' ? '#3a9eff' : '#ff4545';
+        h.textContent = t === '0' ? '🔵 ALPHA' : '🔴 BRAVO';
+        const panel = document.createElement('div');
+        panel.id = 'team-panel-' + t;
+        panel.className = 'team-panel-inner';
+        hud.append(h, panel);
       });
+      if (state) this._updateTeamPanels();
     } else if (tab === 'log') {
-      // Clone dice + log
-      const dp = document.getElementById('dice-panel');
-      const lg = document.getElementById('combat-log');
-      if (dp) {
-        const h = document.createElement('div');
-        h.className = 'panel-title'; h.textContent = '🎲 DICE';
-        content.appendChild(h);
-        content.appendChild(dp.cloneNode(true));
-      }
-      if (lg) {
-        const h = document.createElement('div');
-        h.className = 'panel-title'; h.textContent = '📋 LOG';
-        content.appendChild(h);
-        content.appendChild(lg.cloneNode(true));
-      }
+      const dh = document.createElement('div');
+      dh.className = 'panel-title'; dh.textContent = '🎲 DICE / LOG';
+      const dp = document.createElement('div');
+      dp.id = 'dice-panel';
+      dp.style.cssText = 'overflow-y:auto; flex-shrink:0;';
+      const lh = document.createElement('div');
+      lh.className = 'panel-title'; lh.textContent = '📋 LOG';
+      const lg = document.createElement('div');
+      lg.id = 'combat-log';
+      hud.append(dh, dp, lh, lg);
+      if (state) this._updateLog();
     }
   },
 
-  // Touch support on the battlefield canvas
+  // Touch support — distinguishes tap from scroll on the canvas
   _setupTouchCanvas() {
     const canvas = document.getElementById('battlefield');
     if (!canvas || canvas._touchReady) return;
     canvas._touchReady = true;
 
     canvas.addEventListener('touchstart', (e) => {
-      e.preventDefault();
       const touch = e.changedTouches[0];
       this._touchStartX = touch.clientX;
       this._touchStartY = touch.clientY;
       this._touchMoved  = false;
-    }, { passive: false });
+    }, { passive: true });
 
-    canvas.addEventListener('touchmove', (e) => {
-      e.preventDefault();
-      const touch = e.changedTouches[0];
-      const dx = Math.abs(touch.clientX - this._touchStartX);
-      const dy = Math.abs(touch.clientY - this._touchStartY);
-      if (dx > 8 || dy > 8) this._touchMoved = true;
-    }, { passive: false });
+    canvas.addEventListener('touchmove', () => {
+      this._touchMoved = true;
+    }, { passive: true });
 
     canvas.addEventListener('touchend', (e) => {
+      if (this._touchMoved) return;
       e.preventDefault();
-      if (this._touchMoved) return; // was a scroll, not a tap
       const touch = e.changedTouches[0];
-      // Synthesize a click event at the touch position
-      const click = new MouseEvent('click', {
-        clientX: touch.clientX,
-        clientY: touch.clientY,
+      canvas.dispatchEvent(new MouseEvent('click', {
+        clientX: touch.clientX, clientY: touch.clientY,
         bubbles: true, cancelable: true
-      });
-      canvas.dispatchEvent(click);
+      }));
     }, { passive: false });
   },
 

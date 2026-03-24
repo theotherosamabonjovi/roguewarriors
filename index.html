@@ -46,7 +46,7 @@
       <h2>🗺️ Scenario Editor</h2>
     </div>
 
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+    <div class="sc-inner-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
 
       <!-- LEFT: Map + settings -->
       <div style="display:flex; flex-direction:column; gap:12px;">
@@ -216,7 +216,7 @@
 ──────────────────────────────────────────────────────────────── -->
 <div id="screen-army" class="screen">
   <input type="hidden" id="army-current-player" value="0">
-  <div class="army-container" style="padding: 20px 0; max-height:100vh; overflow:auto; width:min(920px,96%); margin:auto;">
+  <div class="army-container" style="width:min(920px,96%); margin:auto; padding: 20px 0;">
     <div class="army-header">
       <div>
         <h2 id="army-player-title">🔵 Alpha Team — Build Your Squad</h2>
@@ -450,7 +450,7 @@
   </div>
 
   <!-- Mobile HUD (hidden on desktop via CSS) -->
-  <div id="mobile-hud" style="display:none;">
+  <div id="mobile-hud">
     <div id="mobile-hud-tabs">
       <button class="mob-tab active" onclick="UI.mobTab('actions')" id="mob-tab-actions">⚔️ Actions</button>
       <button class="mob-tab"        onclick="UI.mobTab('teams')"   id="mob-tab-teams">👥 Teams</button>

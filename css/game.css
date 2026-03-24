@@ -615,128 +615,209 @@ h2 { font-size: 24px; font-weight: 700; letter-spacing: 2px; }
   #screen-game { font-size: 12px; }
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   MOBILE RESPONSIVE OVERHAUL
-   Target: phones 360-480px wide (portrait) and tablets 481-768px
-   ═══════════════════════════════════════════════════════════════ */
+/* Mobile HUD: hidden by default, only shown inside game screen on mobile */
+#mobile-hud { display: none; }
 
-/* ── Shared mobile utilities ─────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════
+   MOBILE — written clean, desktop untouched
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Base mobile: touch targets, prevent zoom on input ───── */
 @media (max-width: 768px) {
-  h2 { font-size: 18px; letter-spacing: 1px; }
+  input, button, select { touch-action: manipulation; }
 
-  /* Touch targets: all buttons at least 44px tall */
-  .btn, .btn-primary, .btn-secondary, .action-btn,
-  .theme-btn, .density-btn, .gamemode-btn, .reroll-btn,
-  .deploy-done-btn, .editor-brush-btn {
-    min-height: 44px;
-    font-size: 13px;
+  /* Unit cards need explicit tap support (they're divs, not buttons) */
+  .unit-card {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(58,158,255,0.2);
+    cursor: pointer;
   }
-  .action-btn { padding: 10px 12px; }
+  .deploy-unit-card {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(255,190,11,0.2);
+  }
+
+  /* All interactive elements: minimum 44px tap target */
+  .btn, .btn-primary, .btn-secondary,
+  .theme-btn, .density-btn, .gamemode-btn,
+  .reroll-btn, .editor-brush-btn, .mob-tab,
+  .deploy-done-btn {
+    min-height: 44px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+  .action-btn { min-height: 44px; }
 }
 
-/* ── Main menu ───────────────────────────────────────────── */
+/* ── Main menu ────────────────────────────────────────────── */
 @media (max-width: 480px) {
-  .menu-container { gap: 24px; padding: 20px; }
-  .logo h1 { font-size: clamp(26px, 10vw, 44px); letter-spacing: 4px; }
-  .logo .subtitle { font-size: 10px; letter-spacing: 3px; }
-  .menu-buttons { width: 100%; max-width: 320px; gap: 10px; }
+  .menu-container { gap: 24px; padding: 20px 16px; }
+  .logo h1        { font-size: clamp(24px, 9vw, 40px); letter-spacing: 3px; }
+  .logo .subtitle { font-size: 10px; letter-spacing: 2px; }
+  .menu-buttons   { width: 100%; gap: 10px; }
   .btn-primary, .btn-secondary {
+    width: 100%;
     padding: 16px 20px;
-    font-size: 14px;
+    font-size: 15px;
     letter-spacing: 1px;
   }
 }
 
-/* ── Army builder ────────────────────────────────────────── */
-@media (max-width: 600px) {
-  #screen-army { padding: 12px; }
-  .army-container { gap: 12px; }
-  .army-header { flex-direction: column; align-items: flex-start; gap: 8px; }
-  .unit-catalogue {
-    grid-template-columns: 1fr;   /* single column on small phones */
-  }
-  .unit-card { padding: 10px; }
-  .uc-name { font-size: 14px; }
-  .army-actions { justify-content: stretch; }
-  .army-actions .btn { flex: 1; text-align: center; }
-}
-@media (min-width: 601px) and (max-width: 768px) {
-  .unit-catalogue { grid-template-columns: repeat(2, 1fr); }
-}
-
-/* ── Battlefield setup ───────────────────────────────────── */
-@media (max-width: 680px) {
-  #screen-battlefield { padding: 12px; }
-  .battlefield-container {
-    flex-direction: column;
-    gap: 16px;
-  }
-  .bf-controls { min-width: unset; }
-  .bf-preview { width: 100%; align-items: flex-start; }
-  #preview-canvas { max-width: 100%; }
-  .btn-group { flex-wrap: wrap; gap: 6px; }
-  .gamemode-btn, .theme-btn, .density-btn { font-size: 12px; padding: 8px 10px; }
-}
-
-/* ── Game screen — the big one ───────────────────────────── */
+/* ── Army builder ─────────────────────────────────────────── */
 @media (max-width: 768px) {
-  #screen-game { overflow: hidden; }
+  /* Screen is a flex-col that must fill the viewport and scroll */
+  #screen-army {
+    align-items: flex-start;
+    padding: 0;
+    height: 100svh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+  .army-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 12px !important;
+    /* Let the screen handle scroll — container must not constrain height */
+    max-height: none !important;
+    overflow: visible !important;
+    /* Ensure confirm button at bottom is always reachable */
+    padding-bottom: 24px !important;
+  }
+  .army-header { flex-direction: column; gap: 6px; align-items: flex-start; }
+  #army-player-title { font-size: 16px; }
+  .budget-display { font-size: 13px; padding: 6px 12px; }
+  #army-squad-list { min-height: 52px; padding: 8px; }
+  .squad-member { padding: 5px 8px; font-size: 12px; }
 
-  /* Stack vertically: top-bar → canvas → bottom-drawer */
+  /* Compact unit catalogue — icon + name + cost + stats in one row */
+  .unit-catalogue {
+    grid-template-columns: 1fr !important;
+    gap: 8px;
+  }
+  .unit-card {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-rows: auto auto;
+    gap: 2px 10px;
+    padding: 10px 12px;
+    align-items: center;
+  }
+  .uc-header {
+    grid-column: 1 / 3;
+    grid-row: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .uc-icon  { width: 32px; height: 32px; font-size: 16px; flex-shrink: 0; }
+  .uc-name  { font-size: 14px; font-weight: 700; }
+  .uc-cost  { font-size: 12px; }
+  .uc-stats {
+    grid-column: 1 / 4;
+    grid-row: 2;
+    gap: 5px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .stat { font-size: 11px; white-space: nowrap; }
+  .uc-ability { grid-column: 1 / 4; font-size: 11px; }
+  .uc-desc    { display: none; } /* hide long desc on mobile to save space */
+
+  .army-actions {
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 16px;
+    padding-bottom: 16px;
+  }
+  .army-actions .btn { width: 100%; text-align: center; padding: 14px; }
+}
+
+/* ── Battlefield setup ────────────────────────────────────── */
+@media (max-width: 680px) {
+  #screen-battlefield {
+    align-items: flex-start;
+    padding: 12px;
+    height: 100svh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+  #screen-battlefield > div {
+    max-height: none !important;
+    width: 100% !important;
+  }
+  .battlefield-container { flex-direction: column; gap: 16px; }
+  .bf-controls { min-width: unset; }
+  .bf-preview  { width: 100%; }
+  #preview-canvas { max-width: 100%; height: auto; }
+  .gamemode-btn { font-size: 12px; padding: 8px 10px; }
+}
+
+/* ── Game screen ──────────────────────────────────────────── */
+@media (max-width: 768px) {
+  #screen-game { overflow: hidden; height: 100svh; }
+
+  .top-bar-spacer { display: none; }
+  .turn-banner    { font-size: 11px; padding: 5px 8px; }
+  .game-menu-btn  { padding: 0 10px; font-size: 12px; }
+
   #game-layout {
     flex-direction: column;
-    overflow: hidden;
-  }
-
-  /* Hide the fixed side panels completely on mobile */
-  .side-panel { display: none !important; }
-
-  /* Canvas gets all remaining vertical space */
-  #game-center {
     flex: 1;
     min-height: 0;
     overflow: hidden;
   }
+
+  /* Hide desktop side-panels completely */
+  .side-panel { display: none !important; }
+
+  /* Canvas fills all remaining space between top-bar and HUD */
+  #game-center {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    position: relative;
+  }
   #battlefield-wrapper {
     width: 100%;
     height: 100%;
-    overflow: auto;
+    overflow: scroll;
     -webkit-overflow-scrolling: touch;
   }
 
-  /* ── Mobile bottom HUD ───────────────────────────────────
-     Replaces the left + right panels. A compact strip at the
-     bottom containing: action buttons | unit info | log/dice  */
+  /* Show the mobile HUD */
   #mobile-hud {
-    display: flex;
+    display: flex !important;
     flex-direction: column;
     background: var(--bg2);
-    border-top: 1px solid var(--border);
+    border-top: 2px solid var(--border);
     flex-shrink: 0;
-    max-height: 42vh;
-    overflow: hidden;
+    height: 38vh;
+    max-height: 300px;
   }
 
   #mobile-hud-tabs {
     display: flex;
-    border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
   }
   .mob-tab {
     flex: 1;
-    padding: 8px 4px;
+    padding: 10px 4px;
     background: var(--bg3);
     border: none;
+    border-right: 1px solid var(--border);
     color: var(--text2);
     font-size: 12px;
     font-weight: 600;
     cursor: pointer;
-    border-right: 1px solid var(--border);
-    transition: background 0.15s, color 0.15s;
     text-align: center;
+    transition: background 0.15s, color 0.15s;
+    min-height: 40px;
   }
   .mob-tab:last-child { border-right: none; }
-  .mob-tab.active { background: var(--bg); color: var(--text); }
+  .mob-tab.active { background: var(--bg); color: var(--accent); border-bottom: 2px solid var(--accent); }
 
   #mobile-hud-content {
     flex: 1;
@@ -745,102 +826,81 @@ h2 { font-size: 24px; font-weight: 700; letter-spacing: 2px; }
     padding: 6px 8px;
   }
 
-  /* Deploy panel lives in a full-screen overlay on mobile */
-  #deploy-section.mobile-deploy-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 300;
-    background: var(--bg2);
-    display: flex !important;
-    flex-direction: column;
-    padding: 12px;
-    overflow-y: auto;
-  }
-  #deploy-panel {
+  /* Action buttons inside HUD: 2-col grid */
+  #mobile-hud-content #action-buttons,
+  #mobile-hud-content #mob-action-buttons {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 6px;
-  }
-}
-
-/* Turn banner top bar */
-@media (max-width: 480px) {
-  .top-bar-spacer { display: none; }
-  .turn-banner { font-size: 11px; padding: 6px 8px; }
-  .game-menu-btn { padding: 0 10px; font-size: 12px; }
-}
-
-/* ── Action buttons on mobile: horizontal scrolling strip ── */
-@media (max-width: 768px) {
-  /* When rendered into #mobile-hud-content the action buttons
-     should flow in a compact two-column grid */
-  #action-buttons {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: 1fr 1fr;
     gap: 5px;
     padding: 0;
   }
-  .action-btn { font-size: 12px; padding: 9px 8px; gap: 6px; }
-  .action-btn.end-btn { grid-column: span 2; }
-  .hint-text { grid-column: span 2; }
+  #mobile-hud-content .action-btn { font-size: 12px; padding: 10px 8px; gap: 5px; }
+  #mobile-hud-content .action-btn.end-btn { grid-column: 1 / -1; }
+  #mobile-hud-content .hint-text { grid-column: 1 / -1; }
+
+  /* Deploy panel inside HUD */
+  #mobile-hud-content #deploy-panel,
+  #mobile-hud-content #mob-deploy-panel {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 5px;
+  }
+  #mobile-hud-content .deploy-unit-card { font-size: 11px; padding: 6px 8px; }
+  #mobile-hud-content .deploy-done-btn  { margin: 6px 0 2px; width: 100%; }
+
+  /* Unit rows in team panel */
+  .unit-row     { font-size: 12px; padding: 6px 4px; }
+  .ur-icon      { width: 20px; height: 20px; font-size: 11px; }
+  #dice-panel   { max-height: none; }
+  #combat-log   { font-size: 11px; }
+  .die          { width: 24px; height: 24px; font-size: 12px; }
 }
 
-/* ── Team panels compact for mobile HUD ──────────────────── */
-@media (max-width: 768px) {
-  .team-panel-inner { max-height: none; padding: 4px; }
-  .unit-row { padding: 6px 6px; font-size: 12px; }
-  #dice-panel { max-height: none; }
-  #combat-log { max-height: none; font-size: 11px; }
-  .die { width: 24px; height: 24px; font-size: 12px; }
-}
-
-/* ── Game over card ──────────────────────────────────────── */
+/* ── Game over overlay ────────────────────────────────────── */
 @media (max-width: 480px) {
-  .go-card { padding: 32px 20px; border-radius: 12px; }
-  #go-title { font-size: 28px; letter-spacing: 2px; }
-  #go-subtitle { font-size: 14px; }
-  .gm-buttons { gap: 8px; }
+  .go-card      { padding: 24px 16px; border-radius: 12px; max-width: 92vw; }
+  #go-title     { font-size: 26px; }
+  #go-subtitle  { font-size: 13px; }
 }
 
-/* ── Game menu modal ─────────────────────────────────────── */
+/* ── In-game menu modal ───────────────────────────────────── */
 @media (max-width: 480px) {
-  .game-menu-card { padding: 28px 20px; min-width: unset; width: 90vw; }
-  .gm-title { font-size: 20px; }
+  .game-menu-card { padding: 24px 16px; min-width: unset; width: 92vw; }
+  .gm-title { font-size: 20px; letter-spacing: 2px; }
+  .gm-btn   { padding: 12px 16px; font-size: 13px; }
 }
 
-/* ── Multiplayer lobby ───────────────────────────────────── */
+/* ── Multiplayer lobby ────────────────────────────────────── */
 @media (max-width: 480px) {
-  .lobby-container { width: 100%; padding: 12px; }
-  .lobby-card { padding: 16px; }
+  #screen-lobby { padding: 12px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .lobby-container { width: 100%; max-width: 100%; gap: 14px; }
+  .lobby-card  { padding: 16px 14px; }
   #room-code-display { font-size: 18px; letter-spacing: 2px; }
+  .code-input  { font-size: 18px; }
 }
 
-/* ── Scenario editor ─────────────────────────────────────── */
+/* ── Scenario editor ──────────────────────────────────────── */
 @media (max-width: 680px) {
-  #screen-scenario { padding: 12px; }
-  /* Two-column grid → single column */
-  #screen-scenario > div > div[style*="grid"] {
-    grid-template-columns: 1fr !important;
-  }
+  #screen-scenario { padding: 12px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  #screen-scenario > div { width: 100% !important; }
+  /* The inner 2-col grid */
+  #screen-scenario .sc-inner-grid { grid-template-columns: 1fr !important; }
 }
 
-/* ── Map editor overlay ──────────────────────────────────── */
+/* ── Map editor overlay ───────────────────────────────────── */
 @media (max-width: 600px) {
-  #map-editor-overlay {
-    gap: 8px;
-    padding: 8px;
-  }
   .editor-brush-btn { padding: 8px 10px; font-size: 12px; }
 }
 
-/* ── How to play ─────────────────────────────────────────── */
+/* ── How to play ──────────────────────────────────────────── */
 @media (max-width: 480px) {
-  #screen-howtoplay { padding: 16px 12px; }
-  .rules-content { padding: 16px; }
+  #screen-howtoplay { padding: 16px 12px; overflow-y: auto; }
+  .rules-content { padding: 16px 12px; }
+  .rules-section p, .rules-section li { font-size: 12px; }
 }
 
-/* ── Prevent rubber-band scroll on iOS at the body level ─── */
-@supports (-webkit-touch-callout: none) {
-  html, body { position: fixed; overflow: hidden; width: 100%; height: 100%; }
-  .screen { height: 100dvh; }   /* dvh respects the iOS browser chrome */
+/* ── Safe area insets (notched phones) ────────────────────── */
+@supports (padding: env(safe-area-inset-bottom)) {
+  #mobile-hud { padding-bottom: env(safe-area-inset-bottom); }
+  #screen-menu .menu-container { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
 }
