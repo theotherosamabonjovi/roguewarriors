@@ -137,7 +137,8 @@ class Engine {
       hp: def.hp, maxHp: def.hp,
       // Rogue Warriors stats
       ma: effectiveMA,        // Movement Allowance in tiles
-      weapon: weaponKey,      // weapon key into WEAPON_DEFS
+      weapon: weaponKey,      // primary weapon key into WEAPON_DEFS
+      sidearm: def.sidearm || null,  // sidearm used for Shoot when primary is grenade
       ability: def.ability,
       // combat state flags
       alive:        true,
@@ -420,7 +421,10 @@ class Engine {
   //  3. For each Hit → Armour Save: roll 1D6 + weapon AP
   //       1-2: 1 Damage (lose 1 Heart)   3-4: Pinned (can't move next activation)   5-6: Saved
   resolveShoot(attacker, target, aimBonus = 0) {
-    const weapon = WEAPON_DEFS[attacker.weapon] || WEAPON_DEFS.assaultRifle;
+    // Grenadiers fire their pistol sidearm when using the Shoot action
+    const shootWeaponKey = (attacker.sidearm && WEAPON_DEFS[attacker.weapon]?.perk === 'aoeSplash')
+      ? attacker.sidearm : attacker.weapon;
+    const weapon = WEAPON_DEFS[shootWeaponKey] || WEAPON_DEFS.assaultRifle;
     const dist   = this._dist(attacker, target);
 
     // ── Pre-fire checks ──
@@ -625,8 +629,10 @@ class Engine {
   }
 
   getValidTargets(attacker) {
-    // Jammed weapon or needs reload: show targets but shooting will be blocked
-    const weapon = WEAPON_DEFS[attacker.weapon] || WEAPON_DEFS.assaultRifle;
+    // Grenadiers shoot with their sidearm; all others use their primary weapon
+    const shootWeaponKey = (attacker.sidearm && WEAPON_DEFS[attacker.weapon]?.perk === 'aoeSplash')
+      ? attacker.sidearm : attacker.weapon;
+    const weapon = WEAPON_DEFS[shootWeaponKey] || WEAPON_DEFS.assaultRifle;
     const alive = this.units.filter(u => u.alive && u.team !== attacker.team);
     return alive.filter(t => {
       const dist = this._dist(attacker, t);
@@ -734,7 +740,7 @@ class Engine {
     }
   }
 
-  // Medic ability
+  // Medic ability — heals wounded allies (restores HP) or revives dead ones
   tryHeal(medic, targetUnit) {
     if (this.revivedUnits.has(medic.id)) {
       this.addLog(`${medic.name} has already used their heal!`, 'system');
@@ -744,14 +750,25 @@ class Engine {
       this.addLog(`Target too far to heal!`, 'system');
       return false;
     }
-    if (targetUnit.alive) {
+    if (!targetUnit.alive) {
+      // Revive a dead soldier with 1 HP
+      targetUnit.alive  = true;
+      targetUnit.hp     = 1;
       targetUnit.pinned = false;
-      this.addLog(`💉 ${medic.name} patches up ${targetUnit.name} — pin cleared!`, 'ability');
+      this.addLog(`💉 ${medic.name} revives ${targetUnit.name}! (1 HP)`, 'ability');
+    } else if (targetUnit.hp < targetUnit.maxHp) {
+      // Patch up a wounded soldier — restore up to half max HP (min 1)
+      const restored    = Math.max(1, Math.floor(targetUnit.maxHp / 2));
+      targetUnit.hp     = Math.min(targetUnit.maxHp, targetUnit.hp + restored);
+      targetUnit.pinned = false;
+      this.addLog(`💉 ${medic.name} patches up ${targetUnit.name} — +${restored} HP! (${targetUnit.hp}/${targetUnit.maxHp})`, 'ability');
+    } else if (targetUnit.pinned) {
+      // Fully healthy but pinned — clear the pin
+      targetUnit.pinned = false;
+      this.addLog(`💉 ${medic.name} steadies ${targetUnit.name} — pin cleared!`, 'ability');
     } else {
-      targetUnit.alive = true;
-      targetUnit.hp = 1;
-      targetUnit.pinned = false;
-      this.addLog(`💉 ${medic.name} revives ${targetUnit.name}!`, 'ability');
+      this.addLog(`${targetUnit.name} doesn't need healing!`, 'system');
+      return false;
     }
     this.revivedUnits.add(medic.id);
     return true;

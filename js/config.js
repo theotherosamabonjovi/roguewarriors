@@ -87,12 +87,13 @@ const UNIT_DEFS = {
     ma: 5, hp: 6,
     weapon: 'smg',
     color: '#e63946', ability: 'heal', icon: 'cross',
-    desc: 'Armed with SMG. Can revive or patch up an adjacent ally once per game.',
+    desc: 'Armed with SMG. Can heal wounds or revive an adjacent ally once per game.',
   },
   grenadier: {
     name: 'Grenadier', cost: 2,
     ma: 5, hp: 6,
     weapon: 'fragGrenade',
+    sidearm: 'pistol',      // Can Shoot with pistol; uses Grenade only via Ability
     color: '#fb8500', ability: 'blast', icon: 'grenade',
     desc: 'Frag Grenades hit everyone within 3", ignore cover. Careful — a 1 means a dud!',
   },

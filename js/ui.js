@@ -1029,7 +1029,7 @@ const UI = {
         const nearby = state.units.filter(u =>
           u.team === unit.team && u.id !== unit.id &&
           Math.max(Math.abs(unit.x - u.x), Math.abs(unit.y - u.y)) <= 1 &&
-          (!u.alive || u.pinned)
+          (!u.alive || u.pinned || u.hp < u.maxHp)
         );
         if (!nearby.length) { this.showNotif('No allies in range to heal!', 'warn'); return; }
         this._abilityMode = 'heal';
@@ -1654,6 +1654,9 @@ const UI = {
     }
 
     const weapon   = WEAPON_DEFS[unit.weapon] || WEAPON_DEFS.assaultRifle;
+    // Grenadier shoots with their pistol sidearm
+    const shootWeapon = (unit.sidearm && weapon.perk === 'aoeSplash')
+      ? (WEAPON_DEFS[unit.sidearm] || weapon) : weapon;
     const targets  = state.getValidTargets(unit);
     const jammed   = unit.weaponJammed;
     const reload   = unit.needsReload;
@@ -1696,7 +1699,7 @@ const UI = {
 
     // ── Shooting ──
     addBtn('btnAim',      'Aim',    '🔭', al >= 1 && canShoot, '+1 to Shooting Attack rolls on next shot');
-    addBtn('_doShootBtn', 'Shoot',  '🎯', canShoot, `Fire ${weapon.name} — hits on 4+ (click enemy to target)`);
+    addBtn('_doShootBtn', 'Shoot',  '🎯', canShoot, `Fire ${shootWeapon.name} — hits on 4+ (click enemy to target)`);
 
     // Reload (sniper or jammed)
     if (jammed || reload) {
@@ -1980,8 +1983,12 @@ const UI = {
     if (!tt) return;
     const def    = UNIT_DEFS[unit.type];
     const weapon = WEAPON_DEFS[unit.weapon] || {};
-    const apStr  = weapon.ap ? ` AP${weapon.ap}` : '';
-    const rngStr = weapon.minRange ? `${weapon.minRange}–${weapon.range}"` : `${weapon.range}"`;
+    // For grenadier: show sidearm stats for Shoot, note grenade is via Ability
+    const shootWpn = (unit.sidearm && weapon.perk === 'aoeSplash')
+      ? (WEAPON_DEFS[unit.sidearm] || weapon) : weapon;
+    const apStr  = shootWpn.ap ? ` AP${shootWpn.ap}` : '';
+    const rngStr = shootWpn.minRange ? `${shootWpn.minRange}–${shootWpn.range}"` : `${shootWpn.range}"`;
+    const grenadeNote = unit.sidearm ? `<br>💣 Grenade via Ability · ${WEAPON_DEFS[unit.weapon]?.name}` : '';
     const status = [];
     if (unit.pinned)       status.push('📌 Pinned');
     if (unit.inHeavyCover) status.push('🛡️🛡️ Heavy Cover');
@@ -1991,7 +1998,7 @@ const UI = {
     tt.innerHTML = `
       <strong>${unit.name}</strong> (${this.engine.players[unit.team].name})<br>
       ❤️ ${unit.hp}/${unit.maxHp} Hearts · MA: ${unit.ma}"<br>
-      🔫 ${weapon.name || '?'} · ${rngStr} · ${weapon.attackDice}D6${apStr}<br>
+      🔫 ${shootWpn.name || '?'} · ${rngStr} · ${shootWpn.attackDice}D6${apStr}${grenadeNote}<br>
       ${status.length ? status.join(' · ') + '<br>' : ''}
       <em>${def?.desc || ''}</em>
     `;
