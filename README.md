@@ -1,7 +1,5 @@
 # ⚔ Rogue Warriors Digital
 
-https://theotherosamabonjovi.github.io/roguewarriors/
-
 A browser-based tactical skirmish game adapted from the *Rogue Warriors: A Modern Warfare Skirmish Game* ruleset by Tabletop Skirmish Games.
 
 ## 🚀 Deploying to GitHub Pages

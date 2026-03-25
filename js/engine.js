@@ -126,22 +126,28 @@ class Engine {
     const def = UNIT_DEFS[type];
     if (!def) throw new Error('Unknown unit type: ' + type);
     const id = 'u' + (++this._uidCounter);
+    const weaponKey = def.weapon || 'assaultRifle';
+    const weaponDef = WEAPON_DEFS[weaponKey] || WEAPON_DEFS.assaultRifle;
+    // LMG drawback: -1 MA
+    const effectiveMA = (weaponDef.drawback === 'minusOneMA') ? (def.ma - 1) : def.ma;
     return {
       id, type, team,
       name: def.name,
       x, y,
       hp: def.hp, maxHp: def.hp,
-      move: def.move,
-      skill: def.skill,
-      range: def.range,
-      dice: def.dice,
-      defense: def.defense,
+      // Rogue Warriors stats
+      ma: effectiveMA,        // Movement Allowance in tiles
+      weapon: weaponKey,      // weapon key into WEAPON_DEFS
       ability: def.ability,
-      // state
-      alive: true,
-      suppressed: false,
-      inCover: false,
-      aiming: false,
+      // combat state flags
+      alive:        true,
+      pinned:       false,    // Pinned: cannot move next activation (Armour Save 3-4 result)
+      inCover:      false,    // Light Cover: -1 to incoming attack rolls
+      inHeavyCover: false,    // Heavy Cover: -2 to incoming attack rolls
+      aiming:       false,    // Aim action used: +1 to next shooting roll
+      weaponJammed: false,    // Assault Rifle jam: must spend Shoot action to clear
+      needsReload:  false,    // Sniper Rifle: must reload after firing
+      hasRun:       false,    // Ran this activation (cannot shoot)
     };
   }
 
@@ -280,10 +286,12 @@ class Engine {
   }
 
   // ─── Movement ─────────────────────────────────────────────
-  getMovementRange(unit, isSprint = false) {
-    const dist = isSprint ? unit.move * 2 : unit.move;
+  getMovementRange(unit, isRun = false) {
+    if (unit.pinned) return [];
+    const dist = isRun ? unit._runBonus || 3 : unit.ma;
     const reachable = [];
     const visited = {};
+    // Use fractional steps so water costs 2 movement per tile (half MA)
     const queue = [{ x: unit.x, y: unit.y, steps: 0 }];
     visited[`${unit.x},${unit.y}`] = true;
 
@@ -300,8 +308,11 @@ class Engine {
         const tile = this.board[ny][nx];
         if (tile.type === TILE.BUILDING) continue;
         if (this.getUnitAt(nx, ny)) continue;
+        // Water costs 2 movement tiles (rounded up) — half MA per rulebook
+        const tileCost = tile.type === TILE.WATER ? 2 : 1;
+        if (steps + tileCost > dist) continue;
         visited[key] = true;
-        queue.push({ x: nx, y: ny, steps: steps + 1 });
+        queue.push({ x: nx, y: ny, steps: steps + tileCost });
       }
     }
     return reachable;
@@ -354,8 +365,10 @@ class Engine {
     const tile = this.board[y][x];
     unit.x = x;
     unit.y = y;
-    unit.inCover = (tile.type === TILE.COVER || tile.type === TILE.RUBBLE);
-    unit.suppressed = false;
+    // Cover status from tile: Cover/Rubble = Light Cover; not auto Heavy Cover (needs Take Cover action)
+    unit.inCover      = (tile.type === TILE.COVER || tile.type === TILE.RUBBLE);
+    unit.inHeavyCover = false; // heavy cover only via Take Cover action
+    unit.pinned       = false; // moving clears any queued pinned display (pin already took effect)
     this.addLog(`${unit.name} (${this.players[unit.team].name}) moves to (${x},${y})`, 'move');
     // Move flag with carrier
     if (this.gameMode === 'ctf') {
@@ -394,12 +407,231 @@ class Engine {
     return true;
   }
 
+  // ─── D3 helper ────────────────────────────────────────────
+  rollD3() { return 1 + Math.floor(Math.random() * 3); }
+
   // ─── Combat ───────────────────────────────────────────────
+  // Rogue Warriors Shooting Attack sequence:
+  //  1. All Shooting Attacks hit on 4+
+  //  2. Modifiers to the attack roll (effectively shifting the target number):
+  //       -1 Light Cover (need 5+)  -2 Heavy Cover (need 6+)
+  //       +1 Aim action (need 3+)   +1 within half range (need 3+)
+  //       SMG drawback: -1 to attack roll (need 5+ base)
+  //  3. For each Hit → Armour Save: roll 1D6 + weapon AP
+  //       1-2: 1 Damage (lose 1 Heart)   3-4: Pinned (can't move next activation)   5-6: Saved
+  resolveShoot(attacker, target, aimBonus = 0) {
+    const weapon = WEAPON_DEFS[attacker.weapon] || WEAPON_DEFS.assaultRifle;
+    const dist   = this._dist(attacker, target);
+
+    // ── Pre-fire checks ──
+    if (attacker.weaponJammed) {
+      this.addLog(`🔧 ${attacker.name}'s weapon is JAMMED — spend a Shoot action to clear!`, 'system');
+      return this._nullResult(attacker, target);
+    }
+    if (weapon.drawback === 'mustReload' && attacker.needsReload) {
+      this.addLog(`🔄 ${attacker.name} must Reload before firing the Sniper Rifle again!`, 'system');
+      return this._nullResult(attacker, target);
+    }
+    if (weapon.minRange && dist < weapon.minRange) {
+      this.addLog(`${attacker.name} is too close for the ${weapon.name} (min range ${weapon.minRange}")!`, 'miss');
+      return this._nullResult(attacker, target);
+    }
+
+    // ── Calculate hit target number (base 4+) ──
+    let hitTarget = 4;
+
+    // Cover: only applies to ranged attacks, not melee
+    let coverType = 'none';
+    if (target.inHeavyCover) {
+      coverType = 'heavy'; hitTarget += 2;  // need 6+
+    } else if (target.inCover) {
+      coverType = 'light'; hitTarget += 1;  // need 5+
+    }
+
+    // Half-range bonus (+1 to roll = −1 to target number)
+    const halfRange = Math.floor(weapon.range / 2);
+    if (dist <= halfRange) hitTarget -= 1;
+
+    // Aim bonus
+    if (attacker.aiming || aimBonus > 0) hitTarget -= (aimBonus || 1);
+
+    // SMG drawback: −1 to Shooting Attacks (effectively +1 to target number)
+    if (weapon.drawback === 'minusOneShoot') hitTarget += 1;
+
+    // Stealth: Scout in cover needs natural 6 to hit
+    const stealthActive = (target.ability === 'stealth' && target.inCover);
+    if (stealthActive) hitTarget = 6;
+
+    hitTarget = Math.max(2, Math.min(6, hitTarget));
+
+    // ── Leader Command Aura: reroll one failed attack die ──
+    const hasLeaderAura = this.units.some(u =>
+      u.alive && u.team === attacker.team && u.ability === 'command' &&
+      u.id !== attacker.id && this._dist(attacker, u) <= 3
+    );
+
+    // ── Roll Attack Dice ──
+    const rolls = [];
+    for (let i = 0; i < weapon.attackDice; i++) rolls.push(this.rollD6());
+
+    let finalRolls = [...rolls];
+    let rerolled   = null;
+    if (hasLeaderAura) {
+      const failIdx = finalRolls.findIndex(r => r < hitTarget);
+      if (failIdx >= 0) {
+        const newRoll = this.rollD6();
+        rerolled = { idx: failIdx, from: finalRolls[failIdx], to: newRoll };
+        finalRolls[failIdx] = newRoll;
+      }
+    }
+
+    // ── Weapon-specific perk/drawback checks on attack rolls ──
+    let bonusAP      = 0;
+    let weaponJammed = false;
+
+    if (weapon.drawback === 'weaponJam') {
+      if (finalRolls.filter(r => r === 1).length >= 3) {
+        weaponJammed = true;
+        attacker.weaponJammed = true;
+        this.addLog(`🔧 ${attacker.name}'s Assault Rifle is JAMMED! Spend a Shoot action to clear.`, 'system');
+      }
+    }
+    if (weapon.perk === 'triSixAP' && finalRolls.filter(r => r === 6).length >= 3) {
+      bonusAP = -1;  // −1 AP bonus (hurts target saves more)
+      this.addLog(`⚡ ${attacker.name}: Three 6s! −1 bonus Armour Piercing!`, 'ability');
+    }
+
+    // LMG auto-pin: any natural 6 on the attack roll auto-pins (target still saves)
+    const lmgAutoPinCount = (weapon.perk === 'autoPin')
+      ? finalRolls.filter(r => r === 6).length : 0;
+
+    const hitCount = finalRolls.filter(r => r >= hitTarget).length;
+
+    // ── Armour Save for each Hit ──
+    // Roll 1D6, apply AP (weapon.ap + bonusAP), then:
+    //   1-2 → 1 Damage   3-4 → Pinned   5-6 → Saved
+    const effectiveAP  = weapon.ap + bonusAP;
+    const armourSaves  = [];
+    let wounds = 0;
+    let pinned = 0;
+
+    // Sniper perk: auto 1D3 damage if at least one hit (target still saves normally)
+    let sniperBonusDmg = 0;
+    if (weapon.perk === 'auto1D3Dmg' && hitCount > 0) {
+      sniperBonusDmg = this.rollD3();
+    }
+
+    for (let h = 0; h < hitCount; h++) {
+      const rawSave  = this.rollD6();
+      const modSave  = rawSave + effectiveAP;   // AP is negative → lowers the save
+      armourSaves.push({ raw: rawSave, modified: modSave });
+      if (modSave <= 2)      wounds++;          // 1-2: Damage
+      else if (modSave <= 4) pinned++;          // 3-4: Pinned
+      // 5-6: Saved — no effect
+    }
+
+    wounds += sniperBonusDmg;
+
+    // LMG: each natural 6 also pins (adds to pinned count)
+    pinned += lmgAutoPinCount;
+
+    // Frag Grenade dud check: if any attack die rolls a 1, roll 1D6; on 1 = detonates in hand
+    if (weapon.drawback === 'dud' && finalRolls.some(r => r === 1)) {
+      const dudRoll = this.rollD6();
+      if (dudRoll === 1) {
+        this.addLog(`💥 GRENADE DETONATES IN HAND! ${attacker.name} is hit!`, 'death');
+        attacker.hp = Math.max(0, attacker.hp - 1);
+        if (attacker.hp <= 0) { attacker.alive = false; }
+        this.checkObjectiveWin();
+      } else {
+        this.addLog(`Grenade dud check: rolled ${dudRoll} — close call!`, 'system');
+      }
+    }
+
+    // Shotgun knockback: if any hit → push target 1 tile away
+    if (weapon.perk === 'knockback' && hitCount > 0 && target.alive) {
+      const dx = Math.sign(target.x - attacker.x);
+      const dy = Math.sign(target.y - attacker.y);
+      const nx = target.x + dx, ny = target.y + dy;
+      if (this._inBounds(nx, ny) && this.board[ny][nx].type !== TILE.BUILDING && !this.getUnitAt(nx, ny)) {
+        target.x = nx;
+        target.y = ny;
+        this.addLog(`💨 ${target.name} is knocked back 1 tile!`, 'hit');
+      }
+    }
+
+    // ── Apply results ──
+    const result = {
+      attacker: attacker.id, target: target.id,
+      rolls: finalRolls, originalRolls: rolls,
+      hitTarget, hitCount, coverType, effectiveAP,
+      armourSaves, wounds, pinned, sniperBonusDmg,
+      rerolled, hasLeaderAura, weaponJammed,
+      weaponName: weapon.name,
+    };
+
+    if (wounds > 0 && target.alive) {
+      target.hp -= wounds;
+      if (target.hp <= 0) {
+        target.alive = false; target.hp = 0;
+        this.addLog(`💀 ${target.name} is eliminated!`, 'death');
+        if (this.gameMode === 'ctf')  this.dropFlag(target.id);
+        if (this.gameMode === 'bomb') this.dropBomb(target.id);
+        this.checkObjectiveWin();
+      } else {
+        this.addLog(`${target.name} takes ${wounds} damage!`, 'hit');
+      }
+    }
+    if (pinned > 0 && target.alive) {
+      target.pinned = true;
+      if (!wounds) this.addLog(`📌 ${target.name} is PINNED — cannot move next activation!`, 'hit');
+    }
+    if (wounds === 0 && pinned === 0) {
+      if (hitCount > 0) this.addLog(`🛡️ ${target.name} saves all hits!`, 'miss');
+      else              this.addLog(`${attacker.name} misses!`, 'miss');
+    }
+
+    // Mark sniper as needing reload after firing
+    if (weapon.drawback === 'mustReload') attacker.needsReload = true;
+
+    attacker.aiming = false;
+    return result;
+  }
+
+  // Empty result helper for blocked shots
+  _nullResult(attacker, target) {
+    attacker.aiming = false;
+    return {
+      attacker: attacker.id, target: target.id,
+      rolls: [], hitTarget: 4, hitCount: 0,
+      armourSaves: [], wounds: 0, pinned: 0, coverType: 'none',
+      effectiveAP: 0, weaponName: '', rerolled: null,
+    };
+  }
+
+  // Reload a jammed or sniper weapon (costs 1 Shoot action)
+  reloadWeapon(unit) {
+    if (unit.weaponJammed) {
+      unit.weaponJammed = false;
+      this.addLog(`🔧 ${unit.name} clears the jam — weapon ready!`, 'ability');
+      return true;
+    }
+    if (unit.needsReload) {
+      unit.needsReload = false;
+      this.addLog(`🔄 ${unit.name} reloads the Sniper Rifle — ready to fire!`, 'ability');
+      return true;
+    }
+    return false;
+  }
+
   getValidTargets(attacker) {
+    // Jammed weapon or needs reload: show targets but shooting will be blocked
+    const weapon = WEAPON_DEFS[attacker.weapon] || WEAPON_DEFS.assaultRifle;
     const alive = this.units.filter(u => u.alive && u.team !== attacker.team);
     return alive.filter(t => {
       const dist = this._dist(attacker, t);
-      if (dist > attacker.range) return false;
+      if (dist > weapon.range) return false;
+      if (weapon.minRange && dist < weapon.minRange) return false;
       return this.hasLOS(attacker.x, attacker.y, t.x, t.y);
     });
   }
@@ -408,130 +640,73 @@ class Engine {
     return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)); // Chebyshev
   }
 
-  resolveShoot(attacker, target, extraHitBonus = 0) {
-    const dist = this._dist(attacker, target);
-    let targetNum = attacker.skill;
-
-    // Range penalty
-    const shortRange = Math.floor(attacker.range / 3);
-    const longRange  = Math.floor(attacker.range * 2 / 3);
-    if (dist > longRange)       targetNum += 2;
-    else if (dist > shortRange) targetNum += 1;
-
-    // Cover bonus to defender
-    let coverBonus = 0;
-    if (target.inCover)   coverBonus += 1;
-    const tile = this.board[target.y][target.x];
-    if (tile.type === TILE.COVER || tile.type === TILE.RUBBLE) coverBonus += 1;
-
-    // Suppression penalty
-    if (attacker.suppressed) targetNum += 1;
-
-    // Aiming bonus
-    if (attacker.aiming || extraHitBonus) targetNum -= (extraHitBonus || 1);
-    targetNum = Math.max(2, Math.min(6, targetNum));
-
-    // Command Aura: check if friendly leader nearby
-    const hasLeaderAura = this.units.some(u =>
-      u.alive && u.team === attacker.team && u.ability === 'command' &&
-      u.id !== attacker.id && this._dist(attacker, u) <= 3
-    );
-
-    // Roll attack dice
-    const rolls = [];
-    for (let i = 0; i < attacker.dice; i++) {
-      rolls.push(this.rollD6());
-    }
-
-    // Leader reroll one failed die
-    let hitCount = rolls.filter(r => r >= targetNum).length;
-    let finalRolls = [...rolls];
-    let rerolled = null;
-    if (hasLeaderAura && hitCount < rolls.length) {
-      // Reroll one failed die
-      const failIdx = finalRolls.findIndex(r => r < targetNum);
-      const newRoll = this.rollD6();
-      rerolled = { idx: failIdx, from: finalRolls[failIdx], to: newRoll };
-      finalRolls[failIdx] = newRoll;
-      hitCount = finalRolls.filter(r => r >= targetNum).length;
-    }
-
-    // Each hit: target makes defense save
-    const saves = [];
-    let wounds = 0;
-    for (let h = 0; h < hitCount; h++) {
-      const save = this.rollD6();
-      saves.push(save);
-      const saveTarget = target.defense - coverBonus;
-      if (save < saveTarget) {
-        wounds++;
-        // FIX #2: Stealth rule — Scout in cover can only be wounded on an attack
-        // roll of exactly 6 (double-6 to hit). We check finalRolls[h] (the
-        // attack die that produced this hit), not the defense save roll.
-        if (target.ability === 'stealth' && target.inCover) {
-          if (finalRolls[h] < 6) { wounds--; } // cancel unless attack roll was a 6
-        }
-      } else {
-        // Saved: unit may be suppressed
-        if (Math.random() < 0.3) target.suppressed = true;
-      }
-    }
-
-    const result = {
-      attacker: attacker.id, target: target.id,
-      rolls: finalRolls, originalRolls: rolls,
-      targetNum, hitCount,
-      coverBonus, saves, wounds,
-      rerolled, hasLeaderAura,
-    };
-
-    if (wounds > 0) {
-      target.hp -= wounds;
-      if (target.hp <= 0) {
-        target.alive = false;
-        target.hp = 0;
-        this.addLog(`💀 ${target.name} is eliminated!`, 'death');
-        // Drop flag/bomb if carrier was killed
-        if (this.gameMode === 'ctf')  this.dropFlag(target.id);
-        if (this.gameMode === 'bomb') this.dropBomb(target.id);
-        this.checkObjectiveWin();
-      } else {
-        target.suppressed = true;
-        this.addLog(`${target.name} is hit and suppressed!`, 'hit');
-      }
-    } else {
-      if (hitCount > 0) {
-        this.addLog(`${target.name} saves the hit!`, 'miss');
-      } else {
-        this.addLog(`${attacker.name} misses!`, 'miss');
-      }
-    }
-
-    attacker.aiming = false;
-    return result;
-  }
-
   resolveBlast(attacker, cx, cy) {
-    // Grenadier blast: hits every unit in the 3×3 area — friend or foe.
-    // The AI avoids targeting tiles that would catch allies, but a human
-    // player can throw carelessly and catch their own squad.
+    // Frag Grenade: auto-hit everyone within 3" of landing spot; ignores cover.
+    // On attack roll of 1 → dud check handled in resolveShoot's dud drawback.
     const affected = [];
     const friendlyHit = [];
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -3; dy <= 3; dy++) {
+      for (let dx = -3; dx <= 3; dx++) {
+        if (Math.abs(dx) + Math.abs(dy) > 3) continue; // rough circular radius 3
         const tx = cx + dx, ty = cy + dy;
         const target = this.getUnitAt(tx, ty);
-        if (target && target.alive && target.id !== attacker.id) {
+        if (target && target.alive) {
           affected.push(target);
           if (target.team === attacker.team) friendlyHit.push(target);
         }
       }
     }
-    const results = affected.map(t => this.resolveShoot(attacker, t, 1));
+
+    // For each target: auto-hit (ignores cover), just resolve armour save
+    const weapon  = WEAPON_DEFS[attacker.weapon] || WEAPON_DEFS.fragGrenade;
+    const results = [];
+
+    // Dud check: roll attack die; on 1, dud check
+    const attackRoll = this.rollD6();
+    if (attackRoll === 1) {
+      const dudRoll = this.rollD6();
+      if (dudRoll === 1) {
+        this.addLog(`💥 GRENADE DETONATES IN HAND! ${attacker.name} is hit!`, 'death');
+        attacker.hp = Math.max(0, attacker.hp - 1);
+        if (attacker.hp <= 0) attacker.alive = false;
+        this.checkObjectiveWin();
+        return results;
+      }
+    }
+
+    for (const target of affected) {
+      // Auto-hit, ignore cover — resolve armour save only
+      const rawSave = this.rollD6();
+      const modSave = rawSave + weapon.ap; // ap is -2
+      let wounds = 0, pinned = 0;
+      if (modSave <= 2)      wounds = 1;
+      else if (modSave <= 4) pinned = 1;
+
+      results.push({ attacker: attacker.id, target: target.id, rolls:[attackRoll], hitTarget:4, hitCount:1,
+                     armourSaves:[{raw:rawSave, modified:modSave}], wounds, pinned,
+                     coverType:'none', effectiveAP: weapon.ap, weaponName: weapon.name });
+
+      if (wounds > 0 && target.alive) {
+        target.hp -= wounds;
+        if (target.hp <= 0) {
+          target.alive = false; target.hp = 0;
+          this.addLog(`💀 ${target.name} caught in blast — eliminated!`, 'death');
+          if (this.gameMode === 'ctf')  this.dropFlag(target.id);
+          if (this.gameMode === 'bomb') this.dropBomb(target.id);
+          this.checkObjectiveWin();
+        } else {
+          this.addLog(`${target.name} wounded by grenade blast!`, 'hit');
+        }
+      }
+      if (pinned > 0 && target.alive) {
+        target.pinned = true;
+        this.addLog(`📌 ${target.name} pinned by explosion!`, 'hit');
+      }
+    }
+
     const friendlyStr = friendlyHit.length
-      ? ` ⚠️ Friendly fire — ${friendlyHit.map(u => u.name).join(', ')} caught in blast!`
-      : '';
-    this.addLog(`💥 ${attacker.name} throws grenade at (${cx},${cy}) — ${affected.length} caught in blast!${friendlyStr}`, 'ability');
+      ? ` ⚠️ Friendly fire — ${friendlyHit.map(u => u.name).join(', ')} in blast!` : '';
+    this.addLog(`💥 ${attacker.name} throws grenade at (${cx},${cy}) — ${affected.length} in blast!${friendlyStr}`, 'ability');
     return results;
   }
 
@@ -543,15 +718,18 @@ class Engine {
       target.alive = false;
       target.hp = 0;
       this.addLog(`💀 ${target.name} is taken down in melee!`, 'death');
+      if (this.gameMode === 'ctf')  this.dropFlag(target.id);
+      if (this.gameMode === 'bomb') this.dropBomb(target.id);
+      this.checkObjectiveWin();
       return { winner: attacker, aRoll, dRoll };
     } else if (dRoll > aRoll) {
-      attacker.suppressed = true;
-      this.addLog(`${attacker.name} is repelled and suppressed!`, 'hit');
+      attacker.pinned = true;
+      this.addLog(`${attacker.name} is repelled and pinned!`, 'hit');
       return { winner: target, aRoll, dRoll };
     } else {
-      attacker.suppressed = true;
-      target.suppressed = true;
-      this.addLog(`Melee tied — both units suppressed!`, 'miss');
+      attacker.pinned = true;
+      target.pinned   = true;
+      this.addLog(`Melee tied — both units pinned!`, 'miss');
       return { winner: null, aRoll, dRoll };
     }
   }
@@ -567,13 +745,12 @@ class Engine {
       return false;
     }
     if (targetUnit.alive) {
-      // Remove suppression
-      targetUnit.suppressed = false;
-      this.addLog(`💉 ${medic.name} patches up ${targetUnit.name}!`, 'ability');
+      targetUnit.pinned = false;
+      this.addLog(`💉 ${medic.name} patches up ${targetUnit.name} — pin cleared!`, 'ability');
     } else {
-      // Revive with 1hp if adjacent
       targetUnit.alive = true;
       targetUnit.hp = 1;
+      targetUnit.pinned = false;
       this.addLog(`💉 ${medic.name} revives ${targetUnit.name}!`, 'ability');
     }
     this.revivedUnits.add(medic.id);
@@ -593,10 +770,18 @@ class Engine {
     this.activeUnit   = unit.id;
     this.actionsLeft  = MAX_ACTIONS;
     this.hasMoved     = false;
-    this.hasSprinted  = false;
+    this.hasSprinted  = false; // kept for serialization compat
+    this.hasRun       = false;
     this.isAiming     = false;
     this.actionTakenThisActivation = false;
-    unit.aiming       = false;
+    unit.aiming  = false;
+    unit.hasRun  = false;
+    // Pinned: warrior cannot move this activation; clear pinned after it takes effect
+    if (unit.pinned) {
+      this.hasMoved = true;   // block movement actions
+      unit.pinned   = false;
+      this.addLog(`📌 ${unit.name} is Pinned — movement blocked this activation!`, 'system');
+    }
     this.addLog(`— ${unit.name} activated (${MAX_ACTIONS} actions)`, 'activate');
     return true;
   }
@@ -648,10 +833,6 @@ class Engine {
     this.addLog(`${this.players[this.currentPlayer].name}'s turn`, 'system');
   }
 
-  // ─── Deselect/deactivate without consuming the activation ─
-  // Only locks the unit into activatedThisRound if the player actually spent
-  // at least one action. Clicking a unit then clicking away (or switching to
-  // another unit) without acting leaves it free to be activated again.
   deactivateUnit() {
     if (this.activeUnit && this.actionTakenThisActivation) {
       this.activatedThisRound.add(this.activeUnit);
@@ -660,6 +841,7 @@ class Engine {
     this.actionsLeft = MAX_ACTIONS;
     this.hasMoved    = false;
     this.hasSprinted = false;
+    this.hasRun      = false;
     this.isAiming    = false;
     this.actionTakenThisActivation = false;
   }
@@ -916,9 +1098,15 @@ class Engine {
     this.activatedThisRound = new Set();
     this.overwatchUnits     = new Set();
     this.units.forEach(u => {
-      if (u.alive) { u.suppressed = false; u.aiming = false; }
+      if (u.alive) {
+        // Note: pinned is cleared in activateUnit, not here, so it persists correctly.
+        u.aiming      = false;
+        u.hasRun      = false;
+        // needsReload and weaponJammed persist until cleared by a Reload action
+      }
     });
     this.currentPlayer = 0;
+    this.hasRun = false;
     this.actionTakenThisActivation = false;
     this.addLog(`═══ Round ${this.turn} begins ═══`, 'system');
     if (this.gameMode === 'bomb') this.tickBombTimer();
@@ -938,7 +1126,6 @@ class Engine {
     if (this.log.length > 80) this.log.shift();
   }
 
-  // Serialise state for multiplayer sync
   serialize() {
     return JSON.stringify({
       board: this.board, buildings: this.buildings, coverObjs: this.coverObjs,
@@ -946,7 +1133,7 @@ class Engine {
       theme: this.theme, phase: this.phase, turn: this.turn,
       currentPlayer: this.currentPlayer, activeUnit: this.activeUnit,
       actionsLeft: this.actionsLeft, hasMoved: this.hasMoved,
-      hasSprinted: this.hasSprinted, isAiming: this.isAiming,
+      hasSprinted: this.hasSprinted, hasRun: this.hasRun, isAiming: this.isAiming,
       activatedThisRound: [...this.activatedThisRound],
       winner: this.winner, log: this.log.slice(-20),
       abilityUsed: [...this.abilityUsed], revivedUnits: [...this.revivedUnits],
@@ -955,22 +1142,16 @@ class Engine {
   }
 
   deserialize(str) {
-    // FIX #8: Only restore the explicit fields we serialized. Never use
-    // Object.assign(this, d) — a malicious peer could inject arbitrary keys,
-    // override prototype methods, or immediately declare themselves the winner.
     const d = JSON.parse(str);
     const ALLOWED_FIELDS = [
       'board', 'buildings', 'coverObjs', 'units', 'players',
       'theme', 'phase', 'turn', 'currentPlayer', 'activeUnit',
-      'actionsLeft', 'hasMoved', 'hasSprinted', 'isAiming',
+      'actionsLeft', 'hasMoved', 'hasSprinted', 'hasRun', 'isAiming',
       'winner', 'log', '_uidCounter', 'gameMode', 'objectives',
     ];
     for (const key of ALLOWED_FIELDS) {
-      if (Object.prototype.hasOwnProperty.call(d, key)) {
-        this[key] = d[key];
-      }
+      if (Object.prototype.hasOwnProperty.call(d, key)) this[key] = d[key];
     }
-    // Restore Sets from serialized arrays (validated to be arrays)
     this.activatedThisRound = new Set(Array.isArray(d.activatedThisRound) ? d.activatedThisRound : []);
     this.abilityUsed        = new Set(Array.isArray(d.abilityUsed)        ? d.abilityUsed        : []);
     this.revivedUnits       = new Set(Array.isArray(d.revivedUnits)       ? d.revivedUnits       : []);

@@ -700,6 +700,15 @@ const UI = {
       return;
     }
 
+    if (this._abilityMode === 'charge') {
+      if (clickedUnit && this._chargeTargets?.some(t => t.id === clickedUnit.id)) {
+        this._doCharge(activeUnit, clickedUnit);
+      } else {
+        this._cancelAbilityMode();
+      }
+      return;
+    }
+
     if (this._abilityMode === 'blast') {
       const blastHL = this.renderer.blastHighlights || [];
       const inRange = blastHL.some(t => t.x === x && t.y === y);
@@ -740,7 +749,7 @@ const UI = {
     if (clickedUnit && clickedUnit.team === state.currentPlayer &&
         clickedUnit.alive && !state.activatedThisRound.has(clickedUnit.id)) {
       const tileInMoveRange = this.renderer.moveHighlights.some(t => t.x === x && t.y === y);
-      const canStillMove    = state.actionsLeft >= 1 && !state.hasMoved && !state.hasSprinted;
+      const canStillMove    = state.actionsLeft >= 1 && !state.hasMoved && !state.hasRun;
       if (tileInMoveRange && canStillMove) {
         // Player wants to move to this tile, not switch units — fall through to move
       } else {
@@ -757,7 +766,7 @@ const UI = {
     // Click on enemy = shoot
     if (clickedUnit && clickedUnit.team !== state.currentPlayer && clickedUnit.alive) {
       const targets = state.getValidTargets(activeUnit);
-      if (targets.some(t => t.id === clickedUnit.id) && state.actionsLeft >= 1 && !state.hasSprinted) {
+      if (targets.some(t => t.id === clickedUnit.id) && state.actionsLeft >= 1 && !activeUnit.hasRun) {
         this._doShoot(activeUnit, clickedUnit);
         return;
       }
@@ -802,10 +811,6 @@ const UI = {
 
   // ─── Action execution ────────────────────────────────────
 
-  // Call after every useAction(). Clears visual state if the activation ended
-  // (useAction triggered endActivation internally), or refreshes highlights if
-  // the unit still has actions left.  This is the single place that decides
-  // what the board looks like after each player action.
   _afterAction(unit, syncPayload) {
     const state = this.engine;
     if (state.phase === 'gameover') {
@@ -814,21 +819,17 @@ const UI = {
       return;
     }
     if (!state.activeUnit) {
-      // endActivation fired internally (actionsLeft hit 0).
-      // Clear visuals and tell the remote client to also end the activation,
-      // advancing their currentPlayer so they can take their turn.
       this._clearActionVisuals();
       if (syncPayload) this._syncOnline(syncPayload);
-      this._syncOnline({ type: 'end' });  // explicit end so remote advances turn
+      this._syncOnline({ type: 'end' });
     } else {
-      // Unit still has actions — refresh highlights for remaining moves/shots.
-      // Only show move range if the unit hasn't moved yet (hasMoved=false).
-      // Showing stale move highlights after a move causes the canvas click handler
-      // to misinterpret clicks-on-occupied-tiles as move attempts.
-      if (!state.hasMoved && !state.hasSprinted) {
+      // Show move range only if haven't moved yet; run range if moved but not yet run
+      if (!state.hasMoved) {
         this._showMoveRange(unit, false);
+      } else if (state.hasRun || unit.hasRun) {
+        this.renderer.moveHighlights = [];  // already ran — no more movement
       } else {
-        this.renderer.moveHighlights = [];   // can't move again — clear highlights
+        this.renderer.moveHighlights = [];  // moved but can't run (run requires move first)
       }
       this._showAttackHighlights(unit);
       if (syncPayload) this._syncOnline(syncPayload);
@@ -837,60 +838,78 @@ const UI = {
     this._checkAITurn();
   },
 
-  // Wipe all selection and highlight state from the renderer.
   _clearActionVisuals() {
     this.renderer.selectedUnit     = null;
     this.renderer.moveHighlights   = [];
     this.renderer.attackHighlights = [];
     this.renderer.blastHighlights  = [];
     this.renderer.healTargets      = [];
-    this._abilityMode              = null;
+    this._abilityMode   = null;
+    this._chargeTargets = null;
   },
 
   _doMove(unit, x, y) {
     const state = this.engine;
-    const sprint = state.hasMoved === false && state.actionsLeft >= 2;
-    const sprintRange = state.getMovementRange(unit, true);
-    const inSprintRange = sprintRange.some(t => t.x === x && t.y === y);
-    const moveRange  = state.getMovementRange(unit, false);
+    const isRun = state.hasRun && state.hasMoved; // running uses the 1D6 extra range
+
+    const moveRange = state.getMovementRange(unit, false);
     const inMoveRange = moveRange.some(t => t.x === x && t.y === y);
+    const runRange  = state.getMovementRange(unit, true);
+    const inRunRange = runRange.some(t => t.x === x && t.y === y);
 
-    if (!inMoveRange && !inSprintRange) return;
-    const actualSprint = !inMoveRange && inSprintRange;
+    if (!inMoveRange && !inRunRange) return;
+    const actualRun = !inMoveRange && inRunRange;
 
-    // Trigger slide animation before state.moveUnit() updates the unit's tile coords.
-    // getPath returns BFS waypoints that route around buildings.
+    // Trigger slide animation
     {
       const _path = state.getPath(unit, x, y);
       const _from = { x: unit.x, y: unit.y };
-      this.renderer.triggerMove(unit.id, _path, actualSprint);
+      this.renderer.triggerMove(unit.id, _path, actualRun);
       if (this.renderer._moveAnims[unit.id]) this.renderer._moveAnims[unit.id]._origin = _from;
     }
     state.moveUnit(unit, x, y);
     state.hasMoved = true;
-    if (actualSprint) {
-      state.hasSprinted = true;
-      state.useAction(2);
+    if (actualRun) {
+      state.hasRun = true;
+      unit.hasRun  = true;
+      state.useAction(1);  // Run costs 1 additional action
     } else {
       state.useAction(1);
     }
 
-    this._afterAction(unit, { type: 'move', unitId: unit.id, x, y, sprint: actualSprint });
+    this._afterAction(unit, { type: 'move', unitId: unit.id, x, y, run: actualRun });
   },
 
   _doShoot(attacker, target) {
     const state = this.engine;
-    if (state.actionsLeft < 1 || state.hasSprinted) return;
+    if (state.actionsLeft < 1 || attacker.hasRun) return;
+
+    // Shooting into base-to-base contact: misses auto-hit a friendly in contact
     const result = state.resolveShoot(attacker, target);
     this.renderer.triggerFlash(target.id);
     this._showDiceResult(result);
+
+    // RW rule: if shooting into base contact and attacker missed, friendly adjacent to
+    // target takes the hit (attacker's own units only — they don't dodge)
+    if (result.hitCount === 0) {
+      const friendlyInContact = state.units.find(u =>
+        u.alive && u.team === attacker.team &&
+        Math.max(Math.abs(target.x - u.x), Math.abs(target.y - u.y)) <= 1
+      );
+      if (friendlyInContact) {
+        state.addLog(`⚠️ Miss into melee — ${friendlyInContact.name} is hit instead!`, 'hit');
+        const friendlyResult = state.resolveShoot(attacker, friendlyInContact);
+        this.renderer.triggerFlash(friendlyInContact.id);
+      }
+    }
+
     state.useAction(1);
-    // Send the authoritative result so the remote applies the same wounds/rolls,
-    // not a separate independent dice roll that could differ.
     this._afterAction(attacker, {
       type: 'shoot', unitId: attacker.id, targetId: target.id,
-      result: { rolls: result.rolls, saves: result.saves, wounds: result.wounds,
-                hitCount: result.hitCount, targetNum: result.targetNum }
+      result: { rolls: result.rolls, armourSaves: result.armourSaves,
+                wounds: result.wounds, pinned: result.pinned,
+                hitCount: result.hitCount, hitTarget: result.hitTarget,
+                effectiveAP: result.effectiveAP, weaponName: result.weaponName }
     });
   },
 
@@ -923,10 +942,12 @@ const UI = {
   },
 
   _cancelAbilityMode() {
-    this._abilityMode = null;
+    this._abilityMode    = null;
+    this._chargeTargets  = null;
     this.renderer.healTargets      = [];
     this.renderer.attackHighlights = [];
     this.renderer.blastHighlights  = [];
+    this.renderer.moveHighlights   = [];
     const unit = this.engine.getActiveUnit();
     if (unit) {
       this._showMoveRange(unit, false);
@@ -935,6 +956,18 @@ const UI = {
   },
 
   // ─── Button actions ─────────────────────────────────────
+  btnReload() {
+    const state = this.engine;
+    const unit  = state.getActiveUnit();
+    if (!unit || state.actionsLeft < 1) return;
+    if (state.reloadWeapon(unit)) {
+      state.useAction(1);
+      this._afterAction(unit, { type: 'reload', unitId: unit.id });
+    } else {
+      this.showNotif('Nothing to reload!', 'warn');
+    }
+  },
+
   btnAim() {
     const state = this.engine;
     const unit  = state.getActiveUnit();
@@ -950,21 +983,34 @@ const UI = {
     const state = this.engine;
     const unit  = state.getActiveUnit();
     if (!unit || state.actionsLeft < 1) return;
-    unit.inCover = true;
-    state.addLog(`🛡️ ${unit.name} takes cover!`, 'ability');
+    const tile = state.board[unit.y][unit.x];
+    if (tile.type === TILE.COVER || tile.type === TILE.RUBBLE) {
+      // On a cover tile: upgrade to Heavy Cover (−2 to incoming attacks)
+      unit.inCover      = true;
+      unit.inHeavyCover = true;
+      state.addLog(`🛡️ ${unit.name} hunkers down — HEAVY COVER (−2 to incoming attacks)!`, 'ability');
+    } else {
+      // Open tile: gain Light Cover (−1 to incoming attacks)
+      unit.inCover      = true;
+      unit.inHeavyCover = false;
+      state.addLog(`🛡️ ${unit.name} takes cover — LIGHT COVER (−1 to incoming attacks)!`, 'ability');
+    }
     state.useAction(1);
     this._afterAction(unit, { type: 'cover', unitId: unit.id });
   },
 
-  btnSprint() {
+  btnRun() {
     const state = this.engine;
     const unit  = state.getActiveUnit();
-    if (!unit || state.actionsLeft < 2 || state.hasMoved) return;
-    // Show sprint range (2x move)
-    const sprintRange = state.getMovementRange(unit, true);
-    this.renderer.moveHighlights = sprintRange;
-    state.addLog(`${unit.name} sprinting — click destination`, 'move');
-    state.hasSprinted = true;  // will be confirmed on move click
+    if (!unit || state.actionsLeft < 1 || !state.hasMoved || state.hasRun) return;
+    // Roll 1D6 for bonus movement distance
+    const bonus = state.rollD6();
+    unit._runBonus = bonus;
+    unit.hasRun    = true;
+    state.hasRun   = true;
+    const runRange = state.getMovementRange(unit, true);
+    this.renderer.moveHighlights = runRange;
+    state.addLog(`🏃 ${unit.name} runs! Roll: ${bonus} — click destination (${bonus} extra tiles)`, 'move');
     this._updateActionButtons(unit);
   },
 
@@ -980,12 +1026,10 @@ const UI = {
         this._afterAction(unit, { type: 'overwatch', unitId: unit.id });
         break;
       case 'heal': {
-        // Heal just enters targeting mode — useAction is called in _doHeal
-        // when the player clicks their target, so no _afterAction here.
         const nearby = state.units.filter(u =>
           u.team === unit.team && u.id !== unit.id &&
           Math.max(Math.abs(unit.x - u.x), Math.abs(unit.y - u.y)) <= 1 &&
-          (!u.alive || u.suppressed)
+          (!u.alive || u.pinned)
         );
         if (!nearby.length) { this.showNotif('No allies in range to heal!', 'warn'); return; }
         this._abilityMode = 'heal';
@@ -995,13 +1039,14 @@ const UI = {
         break;
       }
       case 'blast': {
-        // Highlight tiles within range that have LOS — buildings block grenades.
+        const weapon    = WEAPON_DEFS[unit.weapon] || {};
+        const blastRng  = weapon.range || 6;
         const blastTiles = [];
-        for (let dy = -unit.range; dy <= unit.range; dy++) {
-          for (let dx = -unit.range; dx <= unit.range; dx++) {
+        for (let dy = -blastRng; dy <= blastRng; dy++) {
+          for (let dx = -blastRng; dx <= blastRng; dx++) {
             const tx = unit.x + dx, ty = unit.y + dy;
             if (!state._inBounds(tx, ty)) continue;
-            if (Math.max(Math.abs(dx), Math.abs(dy)) > unit.range) continue;
+            if (Math.max(Math.abs(dx), Math.abs(dy)) > blastRng) continue;
             if (state.hasLOS(unit.x, unit.y, tx, ty)) blastTiles.push({ x: tx, y: ty });
           }
         }
@@ -1029,17 +1074,78 @@ const UI = {
     const state = this.engine;
     const unit  = state.getActiveUnit();
     if (!unit || state.actionsLeft < 2) return;
-    // Find adjacent enemies
-    const enemies = state.units.filter(u =>
+
+    // Find adjacent enemies (already in base contact)
+    const adjacent = state.units.filter(u =>
       u.alive && u.team !== state.currentPlayer &&
       Math.max(Math.abs(unit.x - u.x), Math.abs(unit.y - u.y)) <= 1
     );
-    if (!enemies.length) {
-      this.showNotif('No adjacent enemies to charge!', 'warn'); return;
+
+    if (adjacent.length) {
+      // Already in base contact — just fight
+      const target = adjacent[0];
+      const result = state.resolveMelee(unit, target);
+      this._showMeleeResult(result);
+      state.useAction(2);
+      this._afterAction(unit, { type: 'charge', unitId: unit.id, targetId: target.id });
+      return;
     }
-    const target = enemies[0];
+
+    // Not adjacent — show charge range (MA tiles) and let player click enemy
+    const moveRange = state.getMovementRange(unit, false);
+    // Highlight enemies reachable within MA that have an adjacent open tile
+    const reachableTargets = state.units.filter(u => {
+      if (!u.alive || u.team === state.currentPlayer) return false;
+      // Check if any tile adjacent to the enemy is within move range
+      for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]) {
+        const tx = u.x + dx, ty = u.y + dy;
+        if (moveRange.some(t => t.x === tx && t.y === ty)) return true;
+      }
+      return false;
+    });
+
+    if (!reachableTargets.length) {
+      this.showNotif('No enemies in charge range!', 'warn');
+      return;
+    }
+
+    // Highlight reachable enemy tiles as attack targets and move range
+    this.renderer.moveHighlights   = moveRange;
+    this.renderer.attackHighlights = reachableTargets.map(t => t.id);
+    this._abilityMode = 'charge';
+    this._chargeTargets = reachableTargets;
+    state.addLog(`⚔️ ${unit.name} charging — click an enemy to charge!`, 'melee');
+    this._updateAllPanels();
+  },
+
+  _doCharge(unit, target) {
+    const state = this.engine;
+    // Move to the closest open tile adjacent to the target
+    const moveRange = state.getMovementRange(unit, false);
+    let closestTile = null, bestDist = Infinity;
+    for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]) {
+      const tx = target.x + dx, ty = target.y + dy;
+      const inRange = moveRange.some(t => t.x === tx && t.y === ty);
+      if (!inRange) continue;
+      const d = Math.max(Math.abs(unit.x - tx), Math.abs(unit.y - ty));
+      if (d < bestDist) { bestDist = d; closestTile = { x: tx, y: ty }; }
+    }
+
+    if (closestTile) {
+      const _path = state.getPath(unit, closestTile.x, closestTile.y);
+      const _from = { x: unit.x, y: unit.y };
+      this.renderer.triggerMove(unit.id, _path, false);
+      if (this.renderer._moveAnims[unit.id]) this.renderer._moveAnims[unit.id]._origin = _from;
+      state.moveUnit(unit, closestTile.x, closestTile.y);
+      state.hasMoved = true;
+    }
+
     const result = state.resolveMelee(unit, target);
     this._showMeleeResult(result);
+    this._abilityMode = null;
+    this._chargeTargets = null;
+    this.renderer.moveHighlights   = [];
+    this.renderer.attackHighlights = [];
     state.useAction(2);
     this._afterAction(unit, { type: 'charge', unitId: unit.id, targetId: target.id });
   },
@@ -1115,18 +1221,15 @@ const UI = {
 
     switch (action.type) {
       case 'move':
-      case 'sprint':
         if (!state.getActiveUnit()) state.activateUnit(unit);
         if (unit && state._inBounds(action.x, action.y)) {
-          {
-            const _path = state.getPath(unit, action.x, action.y);
-            const _from = { x: unit.x, y: unit.y };
-            this.renderer.triggerMove(unit.id, _path, action.type === 'sprint');
-            if (this.renderer._moveAnims[unit.id]) this.renderer._moveAnims[unit.id]._origin = _from;
-          }
+          const _path = state.getPath(unit, action.x, action.y);
+          const _from = { x: unit.x, y: unit.y };
+          this.renderer.triggerMove(unit.id, _path, false);
+          if (this.renderer._moveAnims[unit.id]) this.renderer._moveAnims[unit.id]._origin = _from;
           state.moveUnit(unit, action.x, action.y);
-          if (action.sprint) { state.hasSprinted = true; state.useAction(2); }
-          else state.useAction(1);
+          state.hasMoved = true;
+          state.useAction(1);
           this.renderer.selectedUnit = unit;
         }
         break;
@@ -1167,12 +1270,10 @@ const UI = {
         }
         break;
       }
-      case 'heal': {
+      case 'reload':
         if (!state.getActiveUnit()) state.activateUnit(unit);
-        const healTarget = state.getUnit(action.targetId);
-        if (unit && healTarget) { state.tryHeal(unit, healTarget); state.useAction(1); }
+        if (unit) { state.reloadWeapon(unit); state.useAction(1); }
         break;
-      }
       case 'overwatch':
         if (!state.getActiveUnit()) state.activateUnit(unit);
         if (unit) { state.setOverwatch(unit); state.useAction(2); }
@@ -1331,18 +1432,20 @@ const UI = {
 
     switch (action.type) {
       case 'move': {
-        const isSprint = !!action.sprint;
-        const legalTiles = state.getMovementRange(unit, isSprint);
+        const isRun = !!action.run;
+        const legalTiles = state.getMovementRange(unit, isRun);
         const isLegal = legalTiles.some(t => t.x === action.x && t.y === action.y);
         if (!isLegal) return;
         {
           const _path = state.getPath(unit, action.x, action.y);
           const _from = { x: unit.x, y: unit.y };
-          this.renderer.triggerMove(unit.id, _path, isSprint);
+          this.renderer.triggerMove(unit.id, _path, isRun);
           if (this.renderer._moveAnims[unit.id]) this.renderer._moveAnims[unit.id]._origin = _from;
         }
         state.moveUnit(unit, action.x, action.y);
-        isSprint ? (state.hasSprinted = true, state.useAction(2)) : state.useAction(1);
+        state.hasMoved = true;
+        if (isRun) { state.hasRun = true; unit.hasRun = true; }
+        state.useAction(1);
         break;
       }
       case 'aim':
@@ -1359,10 +1462,8 @@ const UI = {
         const t = state.getUnit(action.targetId);
         if (!t) return;
         if (action.result) {
-          // Apply the authoritative result sent by the shooter — no re-roll
           this._applyRemoteCombatResult(unit, t, action.result);
         } else {
-          // Fallback: re-resolve locally (older client compatibility)
           const r = state.resolveShoot(unit, t);
           this._showDiceResult(r);
         }
@@ -1372,8 +1473,10 @@ const UI = {
       }
       case 'blast': {
         if (!state._inBounds(action.x, action.y)) return;
+        const blastWeapon = WEAPON_DEFS[unit.weapon] || {};
+        const blastRange  = blastWeapon.range || 6;
         const dist = Math.max(Math.abs(unit.x - action.x), Math.abs(unit.y - action.y));
-        if (dist > unit.range) return;
+        if (dist > blastRange) return;
         if (action.results) {
           // Apply authoritative per-target results
           for (const res of action.results) {
@@ -1414,8 +1517,6 @@ const UI = {
     if (state.phase === 'gameover') this._showGameOver();
   },
 
-  // Apply an authoritative combat result sent by the remote shooter.
-  // Directly sets hp, alive, suppressed from the sender's dice — no local re-roll.
   _applyRemoteCombatResult(attacker, target, res) {
     if (!res || typeof res.wounds !== 'number') return;
     if (res.wounds > 0) {
@@ -1424,24 +1525,25 @@ const UI = {
         target.alive = false;
         target.hp    = 0;
         this.engine.addLog(`💀 ${target.name} is eliminated!`, 'death');
-        if (this.engine.gameMode === 'ctf') this.engine.dropFlag(target.id);
+        if (this.engine.gameMode === 'ctf')  this.engine.dropFlag(target.id);
+        if (this.engine.gameMode === 'bomb') this.engine.dropBomb(target.id);
         this.engine.checkObjectiveWin();
       } else {
-        target.suppressed = true;
-        this.engine.addLog(`${target.name} is hit and suppressed!`, 'hit');
+        this.engine.addLog(`${target.name} takes ${res.wounds} damage!`, 'hit');
       }
-    } else {
+    }
+    if (res.pinned > 0 && target.alive) {
+      target.pinned = true;
+      this.engine.addLog(`📌 ${target.name} is pinned!`, 'hit');
+    }
+    if (!res.wounds && !res.pinned) {
       this.engine.addLog(`${attacker.name} misses!`, 'miss');
     }
     attacker.aiming = false;
-    // Show the dice the remote rolled
     if (res.rolls) this._showDiceResult({ ...res, attacker: attacker.id, target: target.id });
-    if (target.alive === false) {
+    if (!target.alive) {
       const winner = this.engine.checkWin();
-      if (winner !== null) {
-        this.engine.phase  = 'gameover';
-        this.engine.winner = winner;
-      }
+      if (winner !== null) { this.engine.phase = 'gameover'; this.engine.winner = winner; }
     }
   },
 
@@ -1551,61 +1653,105 @@ const UI = {
       return;
     }
 
+    const weapon   = WEAPON_DEFS[unit.weapon] || WEAPON_DEFS.assaultRifle;
     const targets  = state.getValidTargets(unit);
-    const canShoot = targets.length > 0 && al >= 1 && !state.hasSprinted;
+    const jammed   = unit.weaponJammed;
+    const reload   = unit.needsReload;
+    const canShoot = targets.length > 0 && al >= 1 && !unit.hasRun && !jammed && !reload;
+    const canMove  = al >= 1 && !state.hasMoved;
+    const canRun   = al >= 1 && state.hasMoved && !state.hasRun && !unit.hasRun && !unit.pinned;
 
-    const addBtn = (id, label, icon, enabled, tooltip = '') => {
+    const addBtn = (id, label, icon, enabled, tooltip = '', cls = '') => {
       const b = document.createElement('button');
-      b.className = 'action-btn' + (enabled ? '' : ' disabled');
+      b.className = 'action-btn' + (enabled ? '' : ' disabled') + (cls ? ' ' + cls : '');
       b.innerHTML = `${icon}<span>${label}</span>`;
       b.title     = tooltip;
       if (enabled) b.onclick = () => UI[id]?.();
       btns.appendChild(b);
     };
 
-    addBtn('_doMoveBtn',     'Move',       '👣', al >= 1 && !state.hasSprinted, 'Move up to your Move value');
-    addBtn('btnSprint',      'Sprint',     '🏃', al >= 2 && !state.hasMoved, '2× movement, no shooting');
-    addBtn('btnAim',         'Aim',        '🔭', al >= 1 && canShoot, '+1 to hit on next shot');
-    addBtn('_doShootBtn',    'Shoot',      '🎯', canShoot, 'Attack an enemy in range (click enemy on map)');
-    addBtn('btnCharge',      'Charge',     '⚔️', al >= 2, 'Melee attack adjacent enemy');
-    addBtn('btnTakeCover',   'Take Cover', '🛡️', al >= 1, '+1 Defense until next activation');
-    if (unit.ability) {
-      const abilityLabels = { overwatch:'Overwatch', heal:'Heal', blast:'Grenade', stealth:'Stealth', command:'Command', sniper:'Overwatch' };
-      addBtn('btnAbility', abilityLabels[unit.ability] || 'Ability', '⚡',
-             al >= 1 && !state.abilityUsed?.has(unit.id), 'Use specialist ability');
+    // ── Weapon status warnings ──
+    if (jammed) {
+      const warn = document.createElement('div');
+      warn.className = 'action-warn';
+      warn.innerHTML = '🔧 Weapon JAMMED — use Reload to clear';
+      btns.appendChild(warn);
+    }
+    if (reload) {
+      const warn = document.createElement('div');
+      warn.className = 'action-warn';
+      warn.innerHTML = '🔄 Sniper Rifle needs Reload before next shot';
+      btns.appendChild(warn);
+    }
+    if (unit.pinned) {
+      const warn = document.createElement('div');
+      warn.className = 'action-warn';
+      warn.innerHTML = '📌 PINNED — movement blocked this activation';
+      btns.appendChild(warn);
     }
 
-    // ── Objective action buttons ──
+    // ── Movement ──
+    addBtn('_doMoveBtn', 'Move', '👣', canMove, `Move up to MA ${unit.ma}" (${unit.ma} tiles)`);
+    addBtn('btnRun',     'Run',  '🏃', canRun,  'Run: roll 1D6 extra tiles after moving. No shooting this turn.');
+
+    // ── Shooting ──
+    addBtn('btnAim',      'Aim',    '🔭', al >= 1 && canShoot, '+1 to Shooting Attack rolls on next shot');
+    addBtn('_doShootBtn', 'Shoot',  '🎯', canShoot, `Fire ${weapon.name} — hits on 4+ (click enemy to target)`);
+
+    // Reload (sniper or jammed)
+    if (jammed || reload) {
+      addBtn('btnReload', 'Reload', '🔧', al >= 1, jammed ? 'Clear weapon jam' : 'Reload Sniper Rifle');
+    }
+
+    // ── Melee ──
+    addBtn('btnCharge', 'Charge', '⚔️', al >= 2, 'Move into base contact and attack in melee');
+
+    // ── Cover ──
+    const onCoverTile = state.board[unit.y][unit.x]?.type === TILE.COVER ||
+                        state.board[unit.y][unit.x]?.type === TILE.RUBBLE;
+    const coverLabel  = onCoverTile ? 'Heavy Cover' : 'Light Cover';
+    const coverTip    = onCoverTile
+      ? 'Heavy Cover: −2 to incoming attack rolls while on this tile'
+      : 'Light Cover: −1 to incoming attack rolls';
+    addBtn('btnTakeCover', coverLabel, '🛡️', al >= 1, coverTip);
+
+    // ── Specialist ability ──
+    if (unit.ability) {
+      const abilityLabels = {
+        overwatch: 'Overwatch', heal: 'Heal', blast: 'Grenade',
+        stealth: 'Stealth', command: 'Command',
+      };
+      addBtn('btnAbility', abilityLabels[unit.ability] || 'Ability', '⚡',
+        al >= 1 && !state.abilityUsed?.has(unit.id), 'Use specialist ability');
+    }
+
+    // ── Objective buttons ──
     if (state.gameMode === 'ctf' && state.objectives?.flag) {
       const f = state.objectives.flag;
-      // Pick up flag
       if (f.carriedBy === null && f.capturedBy === null && unit.x === f.x && unit.y === f.y) {
-        addBtn('btnPickupFlag', 'Pick Up Flag', '🚩', al >= 1, 'Pick up the flag and carry it to your base');
+        addBtn('btnPickupFlag', 'Pick Up Flag', '🚩', al >= 1, 'Pick up the flag');
       }
     }
     if (state.gameMode === 'bomb' && state.objectives) {
       const obj = state.objectives;
-      // Attacker: pick up bomb if standing on it and not already carrying
       if (unit.team === 0 && obj.bomb && !obj.bombPlanted &&
           obj.bomb.carriedBy === null &&
           unit.x === obj.bomb.x && unit.y === obj.bomb.y) {
-        addBtn('btnPickupBomb', 'Pick Up Bomb', '💣', al >= 1, 'Pick up the bomb and carry it to a site');
+        addBtn('btnPickupBomb', 'Pick Up Bomb', '💣', al >= 1, 'Pick up the bomb');
       }
-      // Attacker carrying bomb: plant at site
       if (unit.team === 0 && obj.bomb?.carriedBy === unit.id && !obj.bombPlanted) {
         const onSite = obj.sites?.some(s => s.x === unit.x && s.y === unit.y && !s.planted);
-        if (onSite) addBtn('btnPlantBomb', 'Plant Bomb', '💣', al >= 1, 'Plant the bomb at this site');
+        if (onSite) addBtn('btnPlantBomb', 'Plant Bomb', '💣', al >= 1, 'Plant the bomb');
       }
-      // Defender: defuse planted bomb on active site
       if (unit.team === 1 && obj.bombPlanted) {
         const activeSite = obj.sites?.find(s => s.id === obj.activeSite);
         if (activeSite && unit.x === activeSite.x && unit.y === activeSite.y) {
-          addBtn('btnDefuseBomb', 'Defuse Bomb', '🔧', al >= 2, 'Defuse the bomb — takes 2 actions');
+          addBtn('btnDefuseBomb', 'Defuse Bomb', '🔧', al >= 2, 'Defuse the bomb — costs 2 actions');
         }
       }
     }
 
-    // End activation button
+    // ── End ──
     const endBtn = document.createElement('button');
     endBtn.className = 'action-btn end-btn';
     endBtn.innerHTML = '✅<span>End</span>';
@@ -1688,10 +1834,19 @@ const UI = {
           (!u.alive ? ' unit-dead' : '') +
           (state.activatedThisRound.has(u.id) ? ' unit-activated' : '') +
           (state.activeUnit === u.id ? ' unit-active' : '');
+        const weapon = WEAPON_DEFS[u.weapon] || {};
+        let statusIcon = '✅';
+        if (!u.alive)       statusIcon = '💀';
+        else if (u.pinned)  statusIcon = '📌';
+        else if (u.inHeavyCover) statusIcon = '🛡️🛡️';
+        else if (u.inCover) statusIcon = '🛡️';
+        else if (u.weaponJammed) statusIcon = '🔧';
+        else if (u.needsReload)  statusIcon = '🔄';
         div.innerHTML = `
           <span class="ur-icon" style="background:${UNIT_DEFS[u.type].color}">${this._unitIcon(u.type)}</span>
           <span class="ur-name">${u.name}</span>
-          <span class="ur-status">${!u.alive ? '💀' : u.suppressed ? '😵' : u.inCover ? '🛡️' : '✅'}</span>
+          <span class="ur-wpn" title="${weapon.name || ''}">${u.weapon ? weapon.attackDice + 'D' : ''}</span>
+          <span class="ur-status">${statusIcon}</span>
         `;
         if (u.alive) div.onclick = () => {
           if (u.team === state.currentPlayer && !state.activatedThisRound.has(u.id) && !state.getActiveUnit()) {
@@ -1729,7 +1884,6 @@ const UI = {
     logEl.scrollTop = logEl.scrollHeight;
   },
 
-  // ─── Dice display ────────────────────────────────────────
   _showDiceResult(result) {
     const panel = document.getElementById('dice-panel');
     if (!panel) return;
@@ -1738,33 +1892,66 @@ const UI = {
     const defUnit  = this.engine.getUnit(result.target);
     const atkName  = attUnit?.name || '?';
     const defName  = defUnit?.name || '?';
+    const wpnName  = result.weaponName || '';
 
     let html = `<div class="dice-result">`;
     html += `<div class="dr-title">${atkName} → ${defName}</div>`;
+    if (wpnName) html += `<div class="dr-weapon">🔫 ${wpnName}</div>`;
+
+    // Attack rolls
+    html += `<div class="dr-label">Attack Dice (hit on ${result.hitTarget}+):</div>`;
     html += `<div class="dr-dice">`;
-    result.rolls.forEach((r, i) => {
-      const hit = r >= result.targetNum;
+    (result.rolls || []).forEach(r => {
+      const hit = r >= result.hitTarget;
       html += `<div class="die ${hit ? 'die-hit' : 'die-miss'}">${r}</div>`;
     });
     html += `</div>`;
-    html += `<div class="dr-info">Need: ${result.targetNum}+ · Hits: ${result.hitCount}</div>`;
-    if (result.saves.length) {
-      html += `<div class="dr-saves">Saves: `;
-      result.saves.forEach(s => {
-        html += `<span class="die die-small ${s >= (defUnit?.defense || 4) ? 'die-save' : 'die-hit'}">${s}</span>`;
+    html += `<div class="dr-info">Need: ${result.hitTarget}+ · Hits: ${result.hitCount}</div>`;
+
+    // Armour Saves
+    if (result.armourSaves && result.armourSaves.length) {
+      const ap = result.effectiveAP || 0;
+      html += `<div class="dr-label">Armour Saves (AP ${ap >= 0 ? '+' : ''}${ap}) — 1-2: dmg · 3-4: pinned · 5-6: saved:</div>`;
+      html += `<div class="dr-dice">`;
+      result.armourSaves.forEach(s => {
+        const mod = s.modified;
+        let cls = 'die-save';
+        let label = `${s.raw}`;
+        if (ap !== 0) label += `→${mod}`;
+        if (mod <= 2)      cls = 'die-hit';   // damage
+        else if (mod <= 4) cls = 'die-pin';   // pinned
+        // else saved
+        html += `<div class="die die-small ${cls}" title="Raw ${s.raw} + AP ${ap} = ${mod}">${label}</div>`;
       });
       html += `</div>`;
     }
+
+    // Sniper bonus damage
+    if (result.sniperBonusDmg) {
+      html += `<div class="dr-bonus">🎯 Sniper: +${result.sniperBonusDmg} bonus damage!</div>`;
+    }
+
+    // Outcome
     if (result.wounds > 0) {
       html += `<div class="dr-outcome wound">💀 ${result.wounds} wound${result.wounds > 1 ? 's' : ''}!</div>`;
-    } else if (result.hitCount > 0) {
-      html += `<div class="dr-outcome saved">🛡️ Saved!</div>`;
-    } else {
-      html += `<div class="dr-outcome miss">Miss!</div>`;
     }
-    if (result.hasLeaderAura) {
-      html += `<div class="dr-bonus">⭐ Leader Aura reroll used</div>`;
+    if (result.pinned > 0) {
+      html += `<div class="dr-outcome pin">📌 Pinned! Cannot move next activation.</div>`;
     }
+    if (!result.wounds && !result.pinned) {
+      if (result.hitCount > 0) html += `<div class="dr-outcome saved">🛡️ All saves passed!</div>`;
+      else                     html += `<div class="dr-outcome miss">Miss!</div>`;
+    }
+
+    // Leader aura note
+    if (result.hasLeaderAura && result.rerolled) {
+      html += `<div class="dr-bonus">⭐ Leader Aura: rerolled die ${result.rerolled.from}→${result.rerolled.to}</div>`;
+    }
+
+    // Cover note
+    if (result.coverType === 'light') html += `<div class="dr-info">🛡️ Light Cover applied (−1 to attack roll)</div>`;
+    if (result.coverType === 'heavy') html += `<div class="dr-info">🛡️🛡️ Heavy Cover applied (−2 to attack roll)</div>`;
+
     html += `</div>`;
     panel.innerHTML = html;
     this.diceHistory.unshift(result);
@@ -1788,17 +1975,25 @@ const UI = {
       </div>`;
   },
 
-  // ─── Tooltips ────────────────────────────────────────────
   _showUnitTooltip(unit) {
     const tt = document.getElementById('tooltip');
     if (!tt) return;
-    const def = UNIT_DEFS[unit.type];
+    const def    = UNIT_DEFS[unit.type];
+    const weapon = WEAPON_DEFS[unit.weapon] || {};
+    const apStr  = weapon.ap ? ` AP${weapon.ap}` : '';
+    const rngStr = weapon.minRange ? `${weapon.minRange}–${weapon.range}"` : `${weapon.range}"`;
+    const status = [];
+    if (unit.pinned)       status.push('📌 Pinned');
+    if (unit.inHeavyCover) status.push('🛡️🛡️ Heavy Cover');
+    else if (unit.inCover) status.push('🛡️ Light Cover');
+    if (unit.weaponJammed)  status.push('🔧 Jammed');
+    if (unit.needsReload)   status.push('🔄 Needs Reload');
     tt.innerHTML = `
       <strong>${unit.name}</strong> (${this.engine.players[unit.team].name})<br>
-      HP: ${unit.hp}/${unit.maxHp} · Move: ${unit.move} · Skill: ${unit.skill}+<br>
-      Range: ${unit.range} · Defense: ${unit.defense}<br>
-      ${unit.suppressed ? '😵 Suppressed · ' : ''}${unit.inCover ? '🛡️ In Cover' : ''}
-      ${def.desc}
+      ❤️ ${unit.hp}/${unit.maxHp} Hearts · MA: ${unit.ma}"<br>
+      🔫 ${weapon.name || '?'} · ${rngStr} · ${weapon.attackDice}D6${apStr}<br>
+      ${status.length ? status.join(' · ') + '<br>' : ''}
+      <em>${def?.desc || ''}</em>
     `;
     tt.style.display = 'block';
   },

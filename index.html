@@ -159,53 +159,64 @@
     <div class="rules-content">
       <div class="rules-section">
         <h3>🎯 Objective</h3>
-        <p>Eliminate all enemy units. Each player commands a Fire Team of 4–8 specialists across a tactical battlefield. Last team standing wins.</p>
+        <p>Eliminate all enemy units, or complete the game-mode objective (CTF, Bomb, VIP Escort). Each Warrior has <strong>1 Heart</strong> (HP). Lose all Hearts = eliminated.</p>
       </div>
       <div class="rules-section">
         <h3>⚡ Turn Structure — Alternate Activations</h3>
         <ul>
-          <li>Players alternate activating one unit at a time.</li>
+          <li>Players alternate activating <strong>one unit at a time</strong>.</li>
           <li>Each activated unit gets <strong>2 Actions</strong>.</li>
-          <li>Once all units have been activated, a new Round begins.</li>
-          <li>Round start: suppression clears, overwatch resets.</li>
+          <li>Once all units have activated, a new Round begins. Pinned status resolves at start of activation.</li>
         </ul>
       </div>
       <div class="rules-section">
         <h3>👣 Actions</h3>
         <ul>
-          <li><strong>Move (1 action):</strong> Move up to your Move value in tiles. Click a blue tile.</li>
-          <li><strong>Sprint (2 actions):</strong> Move up to 2× your Move value. Cannot shoot this activation.</li>
-          <li><strong>Shoot (1 action):</strong> Fire at an enemy in range &amp; line of sight. Click a red enemy.</li>
-          <li><strong>Aim (1 action):</strong> +1 to hit on your next Shoot this activation.</li>
-          <li><strong>Take Cover (1 action):</strong> Gain +1 Defense until your next activation.</li>
-          <li><strong>Charge (2 actions):</strong> Melee attack on an adjacent enemy.</li>
-          <li><strong>Ability (1–2 actions):</strong> Use your unit's specialist ability.</li>
+          <li><strong>Move (1 action):</strong> Move up to your MA (Movement Allowance = 5" for most warriors). Click a blue tile.</li>
+          <li><strong>Run (1 action):</strong> After moving, roll 1D6 for extra tiles. Cannot shoot this activation.</li>
+          <li><strong>Shoot (1 action):</strong> Fire at an enemy in range &amp; line of sight. Hits on <strong>4+</strong>. Click a red enemy.</li>
+          <li><strong>Aim (1 action):</strong> +1 to next Shooting Attack roll (effectively hits on 3+).</li>
+          <li><strong>Light Cover (1 action):</strong> −1 to incoming attack rolls until next activation.</li>
+          <li><strong>Heavy Cover (1 action):</strong> −2 to incoming attack rolls on a cover tile.</li>
+          <li><strong>Charge (2 actions):</strong> Move into base contact and make a melee attack.</li>
+          <li><strong>Reload (1 action):</strong> Clear a Weapon Jam or reload a Sniper Rifle.</li>
         </ul>
       </div>
       <div class="rules-section">
-        <h3>🎲 Combat — Shooting</h3>
+        <h3>🎲 Shooting Attack Sequence</h3>
         <ul>
-          <li>Roll attack dice (1d6 per die shown). Hit on your <strong>Shoot Skill</strong> or higher.</li>
-          <li><strong>Short range</strong>: no penalty. <strong>Medium</strong>: +1 to target. <strong>Long</strong>: +2 to target.</li>
-          <li>Each hit: defender rolls 1d6 vs their <strong>Defense</strong> value. Equal or higher = saved.</li>
-          <li>Failed save = wound (unit eliminated). Near-miss = suppression (−1 to next roll).</li>
-          <li><strong>Cover</strong>: +1 to Defense saves (tile &amp; active cover stacks, max +2).</li>
+          <li>Roll the weapon's <strong>Attack Dice</strong>. Each die <strong>hits on 4+</strong>.</li>
+          <li><strong>Modifiers:</strong> −1 Light Cover (need 5+) · −2 Heavy Cover (need 6+) · +1 Aim or half-range (need 3+) · SMG: −1 to all rolls (need 5+).</li>
+          <li>For each Hit: target rolls <strong>1D6 Armour Save</strong> + weapon AP modifier:</li>
+          <li>🟥 <strong>1–2:</strong> 1 Damage (lose 1 Heart) · 🟪 <strong>3–4:</strong> Pinned (can't move next activation) · 🟩 <strong>5–6:</strong> Saved.</li>
+        </ul>
+      </div>
+      <div class="rules-section">
+        <h3>🔫 Weapons</h3>
+        <ul>
+          <li><strong>Pistol/Revolver:</strong> 6", 2D6, AP 0. Dual-wield = 4D6.</li>
+          <li><strong>Shotgun:</strong> 8", 3D6, AP −1. Hit = knock target back 1".</li>
+          <li><strong>Submachine Gun:</strong> 12", 5D6, AP 0. −1 to Shooting Attack rolls.</li>
+          <li><strong>Assault Rifle:</strong> 18", 3D6, AP 0. Three 6s = bonus AP −1. Three 1s = Weapon Jam.</li>
+          <li><strong>Light Machine Gun:</strong> 3–24", 4D6, AP 0. Natural 6 = Auto-Pin. −1 MA. Scout cannot use.</li>
+          <li><strong>Sniper Rifle:</strong> 6–36", 1D6, AP −1. Hit = 1D3 bonus damage. Must Reload after each shot.</li>
+          <li><strong>Frag Grenade:</strong> Thrown 6". Hits everyone within 3" (ignores cover). AP −2. Roll of 1 = dud check.</li>
         </ul>
       </div>
       <div class="rules-section">
         <h3>🦸 Specialists</h3>
         <ul>
-          <li><strong>Rifleman:</strong> Balanced all-rounder. 1 attack die.</li>
-          <li><strong>Sniper:</strong> Long range, high accuracy, <em>Overwatch</em> — watch a zone for 2 turns.</li>
-          <li><strong>Medic:</strong> Can <em>Heal</em> one adjacent ally per game (remove suppression or revive).</li>
-          <li><strong>Grenadier:</strong> 2 attack dice, short range, <em>Blast</em> hits target + adjacent tiles.</li>
-          <li><strong>Leader:</strong> <em>Command Aura</em> — allies within 3 tiles may reroll one failed die per attack.</li>
-          <li><strong>Scout:</strong> Fast (Move 6), <em>Stealth</em> — enemies need 6+ to wound while in cover.</li>
+          <li><strong>Rifleman:</strong> Assault Rifle. Reliable at all ranges. Cheap backbone unit.</li>
+          <li><strong>Sniper:</strong> Sniper Rifle. Long-range damage dealer. Overwatch ability.</li>
+          <li><strong>Medic:</strong> SMG. Heal ability — revive or un-pin an adjacent ally once per game.</li>
+          <li><strong>Grenadier:</strong> Frag Grenade. Blast hits everyone in 3" AoE, ignores cover.</li>
+          <li><strong>Leader:</strong> Assault Rifle. Command Aura — allies within 3 tiles reroll one failed attack die.</li>
+          <li><strong>Scout:</strong> SMG, MA 6". Stealth — enemies need natural 6 to hit while in cover.</li>
         </ul>
       </div>
       <div class="rules-section">
         <h3>🌐 Multiplayer</h3>
-        <p>Use <strong>Online Multiplayer</strong> to play with friends. Player 1 hosts and shares their Room Code. Player 2 enters it to connect. No account needed — peer-to-peer via the browser.</p>
+        <p>Use <strong>Online Multiplayer</strong> to play with a friend. Player 1 hosts and shares their Room Code. Player 2 enters it to connect. No account needed — peer-to-peer via browser.</p>
       </div>
     </div>
   </div>
@@ -528,11 +539,10 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
       </div>
       <div class="uc-stats">
-        <span class="stat">Mv <strong>${def.move}</strong></span>
-        <span class="stat">Hit <strong>${def.skill}+</strong></span>
-        <span class="stat">Rng <strong>${def.range}</strong></span>
-        <span class="stat">Dice <strong>${def.dice}d6</strong></span>
-        <span class="stat">Def <strong>${def.defense}+</strong></span>
+        <span class="stat">MA <strong>${def.ma}"</strong></span>
+        <span class="stat">Wpn <strong>${(WEAPON_DEFS[def.weapon]||{}).attackDice || '?'}D6</strong></span>
+        <span class="stat">Rng <strong>${(WEAPON_DEFS[def.weapon]||{}).range || '?'}"</strong></span>
+        <span class="stat">AP <strong>${(WEAPON_DEFS[def.weapon]||{}).ap || 0}</strong></span>
       </div>
       ${def.ability ? `<div class="uc-ability">⚡ ${def.ability.charAt(0).toUpperCase() + def.ability.slice(1)}</div>` : ''}
       <div class="uc-desc">${def.desc}</div>

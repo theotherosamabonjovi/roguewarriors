@@ -326,12 +326,30 @@ class Renderer {
     // Activated dimming
     if (activated && !isActive) ctx.globalAlpha = 0.55;
 
-    // Suppression indicator ring
-    if (unit.suppressed) {
-      ctx.strokeStyle = '#ff9800';
-      ctx.lineWidth   = 2;
+    // Pinned indicator ring (purple)
+    if (unit.pinned) {
+      ctx.strokeStyle = '#b84cf7';
+      ctx.lineWidth   = 2.5;
+      ctx.setLineDash([4, 3]);
       ctx.beginPath();
       ctx.arc(cx, cy, 14, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Heavy cover indicator (teal shield ring)
+    if (unit.inHeavyCover) {
+      ctx.strokeStyle = '#00bcd4';
+      ctx.lineWidth   = 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 16, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (unit.inCover) {
+      // Light cover indicator (faint teal)
+      ctx.strokeStyle = 'rgba(0,188,212,0.45)';
+      ctx.lineWidth   = 1.5;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 16, 0, Math.PI * 2);
       ctx.stroke();
     }
 
@@ -406,6 +424,22 @@ class Renderer {
       ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
       ctx.fillText('💣', cx + 10, cy - 10);
       ctx.shadowBlur = 0; ctx.textBaseline = 'alphabetic';
+    }
+
+    // Status badges (pinned 📌 / jammed 🔧 / reload 🔄) above unit
+    const badges = [];
+    if (unit.pinned)       badges.push('📌');
+    if (unit.weaponJammed) badges.push('🔧');
+    if (unit.needsReload)  badges.push('🔄');
+    if (badges.length) {
+      ctx.font = '10px serif';
+      ctx.textBaseline = 'middle';
+      ctx.textAlign    = 'center';
+      ctx.shadowColor  = '#000';
+      ctx.shadowBlur   = 3;
+      badges.forEach((b, i) => ctx.fillText(b, cx - 8 + i * 12, cy - 18));
+      ctx.shadowBlur   = 0;
+      ctx.textBaseline = 'alphabetic';
     }
 
     // Speed lines — short strokes behind the unit in its current travel direction
