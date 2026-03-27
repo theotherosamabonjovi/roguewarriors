@@ -76,6 +76,19 @@
         </div>
 
         <div class="control-group">
+          <div class="control-label">⭐ Point Budget per Team</div>
+          <div class="btn-group" style="flex-wrap:wrap;">
+            <button class="density-btn"        data-sc-budget="5"  onclick="UI.scSetPointBudget(5)">5 pts</button>
+            <button class="density-btn"        data-sc-budget="8"  onclick="UI.scSetPointBudget(8)">8 pts</button>
+            <button class="density-btn active" data-sc-budget="10" onclick="UI.scSetPointBudget(10)">10 pts</button>
+            <button class="density-btn"        data-sc-budget="12" onclick="UI.scSetPointBudget(12)">12 pts</button>
+            <button class="density-btn"        data-sc-budget="15" onclick="UI.scSetPointBudget(15)">15 pts</button>
+            <button class="density-btn"        data-sc-budget="20" onclick="UI.scSetPointBudget(20)">20 pts</button>
+          </div>
+          <div id="sc-budget-info" style="font-size:11px; color:var(--text2); margin-top:4px;">Each team gets 10 points to build their squad.</div>
+        </div>
+
+        <div class="control-group">
           <div class="control-label">Map</div>
           <div class="btn-group">
             <button class="reroll-btn" onclick="UI.scRerollMap()">🎲 Random Map</button>
@@ -98,40 +111,63 @@
         </div>
       </div>
 
-      <!-- RIGHT: Squad builders -->
+      <!-- RIGHT: Squads + scenario type + actions -->
       <div style="display:flex; flex-direction:column; gap:12px;">
+
+        <!-- Alpha Team -->
         <div class="control-group">
-          <div class="control-label" style="color:#3a9eff;">🔵 Alpha Team Squad</div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <div class="control-label" style="color:#3a9eff; margin-bottom:0;">🔵 Alpha Team</div>
+            <span id="sc-budget-0" style="font-size:12px; color:var(--text2); font-weight:600; background:var(--bg3); padding:2px 8px; border-radius:10px;">0/10 pts</span>
+          </div>
           <div id="sc-squad-0" style="display:flex; flex-wrap:wrap; gap:6px; min-height:40px; padding:6px; background:var(--bg3); border-radius:6px;"></div>
           <div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:6px;">
-            <button class="density-btn" onclick="UI.scAddUnit(0,'rifleman')">🔫 Rifleman</button>
-            <button class="density-btn" onclick="UI.scAddUnit(0,'sniper')">🎯 Sniper</button>
-            <button class="density-btn" onclick="UI.scAddUnit(0,'medic')">💉 Medic</button>
-            <button class="density-btn" onclick="UI.scAddUnit(0,'grenadier')">💣 Grenadier</button>
-            <button class="density-btn" onclick="UI.scAddUnit(0,'leader')">⭐ Leader</button>
-            <button class="density-btn" onclick="UI.scAddUnit(0,'scout')">🏹 Scout</button>
+            <button class="density-btn" onclick="UI.scAddUnit(0,'rifleman')">🔫 Rifleman <span style="opacity:.6;font-size:10px;">1pt</span></button>
+            <button class="density-btn" onclick="UI.scAddUnit(0,'sniper')">🎯 Sniper <span style="opacity:.6;font-size:10px;">2pt</span></button>
+            <button class="density-btn" onclick="UI.scAddUnit(0,'medic')">💉 Medic <span style="opacity:.6;font-size:10px;">2pt</span></button>
+            <button class="density-btn" onclick="UI.scAddUnit(0,'grenadier')">💣 Grenadier <span style="opacity:.6;font-size:10px;">2pt</span></button>
+            <button class="density-btn" onclick="UI.scAddUnit(0,'leader')">⭐ Leader <span style="opacity:.6;font-size:10px;">2pt</span></button>
+            <button class="density-btn" onclick="UI.scAddUnit(0,'scout')">🏹 Scout <span style="opacity:.6;font-size:10px;">2pt</span></button>
           </div>
         </div>
 
+        <!-- Bravo Team -->
         <div class="control-group">
-          <div class="control-label" style="color:#ff4545;">🔴 Bravo Team Squad</div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <div class="control-label" style="color:#ff4545; margin-bottom:0;">🔴 Bravo Team</div>
+            <span id="sc-budget-1" style="font-size:12px; color:var(--text2); font-weight:600; background:var(--bg3); padding:2px 8px; border-radius:10px;">0/10 pts</span>
+          </div>
           <div id="sc-squad-1" style="display:flex; flex-wrap:wrap; gap:6px; min-height:40px; padding:6px; background:var(--bg3); border-radius:6px;"></div>
           <div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:6px;">
-            <button class="density-btn" onclick="UI.scAddUnit(1,'rifleman')">🔫 Rifleman</button>
-            <button class="density-btn" onclick="UI.scAddUnit(1,'sniper')">🎯 Sniper</button>
-            <button class="density-btn" onclick="UI.scAddUnit(1,'medic')">💉 Medic</button>
-            <button class="density-btn" onclick="UI.scAddUnit(1,'grenadier')">💣 Grenadier</button>
-            <button class="density-btn" onclick="UI.scAddUnit(1,'leader')">⭐ Leader</button>
-            <button class="density-btn" onclick="UI.scAddUnit(1,'scout')">🏹 Scout</button>
+            <button class="density-btn" onclick="UI.scAddUnit(1,'rifleman')">🔫 Rifleman <span style="opacity:.6;font-size:10px;">1pt</span></button>
+            <button class="density-btn" onclick="UI.scAddUnit(1,'sniper')">🎯 Sniper <span style="opacity:.6;font-size:10px;">2pt</span></button>
+            <button class="density-btn" onclick="UI.scAddUnit(1,'medic')">💉 Medic <span style="opacity:.6;font-size:10px;">2pt</span></button>
+            <button class="density-btn" onclick="UI.scAddUnit(1,'grenadier')">💣 Grenadier <span style="opacity:.6;font-size:10px;">2pt</span></button>
+            <button class="density-btn" onclick="UI.scAddUnit(1,'leader')">⭐ Leader <span style="opacity:.6;font-size:10px;">2pt</span></button>
+            <button class="density-btn" onclick="UI.scAddUnit(1,'scout')">🏹 Scout <span style="opacity:.6;font-size:10px;">2pt</span></button>
           </div>
         </div>
 
+        <!-- Scenario Type selector -->
+        <div class="control-group">
+          <div class="control-label">Scenario Type</div>
+          <div class="btn-group" style="flex-wrap:wrap;">
+            <button class="density-btn active" data-sc-type="single" onclick="UI.scSetScenarioType('single')" title="Play against the AI">🤖 vs AI</button>
+            <button class="density-btn" data-sc-type="local"  onclick="UI.scSetScenarioType('local')"  title="Two players on the same screen">🎯 Local 2-Player</button>
+            <button class="density-btn" data-sc-type="online" onclick="UI.scSetScenarioType('online')" title="Play online with a friend">🌐 Online</button>
+          </div>
+          <div id="sc-type-hint" style="font-size:11px; color:var(--text2); margin-top:4px;">Squads are pre-set — no army builder needed.</div>
+        </div>
+
+        <!-- Actions -->
         <div class="control-group">
           <div class="control-label">Actions</div>
           <div style="display:flex; flex-direction:column; gap:8px;">
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
-              <button class="btn btn-green" onclick="UI.scPlayScenario()">⚔️ Play Scenario</button>
-              <button class="btn btn-blue"  onclick="UI.scSave()">💾 Save to File</button>
+              <button id="sc-play-ai"     class="btn btn-green" onclick="UI.scPlayScenario()">⚔️ Play vs AI</button>
+              <button id="sc-play-local"  class="btn btn-green" onclick="UI.scPlayLocal()"    style="display:none;">🎯 Play Local 2P</button>
+              <button id="sc-play-online" class="btn btn-blue"  onclick="UI.scPlayOnline()"   style="display:none;">🌐 Go to Online Lobby</button>
+              <button class="btn btn-blue" onclick="UI.scSave()">💾 Save to File</button>
             </div>
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
               <label class="btn btn-ghost" style="cursor:pointer;">
@@ -390,6 +426,15 @@
       <input type="text" id="join-code-input" class="code-input" placeholder="ENTER CODE" spellcheck="false">
       <button class="btn btn-blue" onclick="UI.joinGame()">Join Room</button>
     </div>
+
+    <!-- Pending custom scenario (shown when queuing an online scenario from the editor) -->
+    <div id="lobby-scenario-card" class="lobby-card" style="display:none; border:2px solid var(--accent); background:rgba(58,158,255,0.06);">
+      <h3>🗺️ Custom Scenario Ready</h3>
+      <p id="lobby-scenario-label" style="font-size:12px; color:var(--text2);"></p>
+      <p style="font-size:11px; color:var(--text2); margin-top:4px;">Host a room above — your opponent just needs to join with the room code.</p>
+      <button class="btn btn-ghost" style="font-size:12px; margin-top:6px;" onclick="UI.scClearOnlinePending()">✕ Cancel Scenario</button>
+    </div>
+
 
     <div id="lobby-status" style="text-align:center; font-size:13px; color:var(--text2);"></div>
   </div>
