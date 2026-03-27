@@ -1331,7 +1331,7 @@ const UI = {
     // Guard: if the engine isn't initialised yet, only allow pre-game messages.
     // Without this, an unexpected 'end' or action arriving before startGame()
     // would call state.endActivation() on a null object and crash the page.
-    if (!state && !['squadReady','requestInit','init'].includes(action.type)) return;
+    if (!state && !['squadReady','requestInit','init','customScenario'].includes(action.type)) return;
 
     // ── Pre-game messages — handled before any turn-order checks ─────────────
 
@@ -1339,8 +1339,38 @@ const UI = {
     // The joiner deserializes it so both clients share the exact same board,
     // squads, and game-mode settings.  The joiner's own startGame() already
     // set up the renderer/canvas; we just overwrite the engine data here.
-    // ── Squad exchange (army builder phase) ────────────────────────────────
-    // squadReady: a player has confirmed their army.  Store their squad and
+    // 'customScenario': host is launching a pre-built scenario.
+    // Joiner skips the army builder and launches the game screen directly,
+    // then waits for the host's 'init' message to receive the full engine state.
+    if (action.type === 'customScenario') {
+      if (!this.mp?.isHost) {
+        this._joinCustomScenario = true;        // cancel the army-builder timeout
+        clearTimeout(this._joinTimeout);
+        this.armyDraft = [[], []];
+        this.showScreen('screen-game');
+        const eng = new Engine();
+        eng.generateBoard('urban', 'medium');   // placeholder — init will overwrite
+        this.engine   = eng;
+        this.renderer = new Renderer('battlefield');
+        this._setupGameCanvas();
+        this.startRenderLoop();
+        this.renderer._onlineMyTeam = this.myTeam;
+        this._mobSetupHUD();
+        const banner = document.getElementById('turn-banner');
+        if (banner) {
+          banner.textContent = '⏳ Loading custom scenario from host…';
+          banner.className   = 'turn-banner';
+        }
+        ['deploy-section','actions-section','stats-section'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.style.display = 'none';
+        });
+        this._syncOnline({ type: 'requestInit' });
+      }
+      return;
+    }
+
+    // 'squadReady': a player has confirmed their army.  Store their squad and
     // check if both sides are ready.  Neither side advances until both send this.
     if (action.type === 'squadReady') {
       const remoteTeam = this.mp?.isHost ? 1 : 0;
@@ -2106,8 +2136,26 @@ const UI = {
       },
       () => {
         this._setupMultiplayerCallbacks();
-        document.getElementById('lobby-status').textContent = '✅ Opponent connected! Starting army builder…';
-        setTimeout(() => { this.showScreen('screen-army'); this.initArmyBuilder(0); }, 1000);
+        if (this._pendingScenario) {
+          // Custom scenario path — skip army builder entirely.
+          // Signal the joiner to also skip their army builder.
+          this._syncOnline({ type: 'customScenario' });
+          document.getElementById('lobby-status').textContent = '✅ Opponent connected! Launching custom scenario…';
+          setTimeout(() => {
+            const ps = this._pendingScenario;
+            this._pendingScenario = null;
+            this._previewEngine  = ps.engine;
+            this.armyDraft       = ps.squads.slice();
+            this.gameMode        = ps.gameMode;
+            this.theme           = ps.theme;
+            const card = document.getElementById('lobby-scenario-card');
+            if (card) card.style.display = 'none';
+            this.startGame();
+          }, 1000);
+        } else {
+          document.getElementById('lobby-status').textContent = '✅ Opponent connected! Starting army builder…';
+          setTimeout(() => { this.showScreen('screen-army'); this.initArmyBuilder(0); }, 1000);
+        }
       }
     );
   },
@@ -2122,8 +2170,16 @@ const UI = {
     this.mp.join(code,
       () => {
         this._setupMultiplayerCallbacks();
-        document.getElementById('lobby-status').textContent = '✅ Connected! Starting army builder…';
-        setTimeout(() => { this.showScreen('screen-army'); this.initArmyBuilder(1); }, 1000);
+        this._joinCustomScenario = false;   // reset flag
+        document.getElementById('lobby-status').textContent = '✅ Connected! Starting…';
+        // Give the host 1.5 s to send a 'customScenario' handshake before we
+        // fall back to the normal army-builder flow.
+        this._joinTimeout = setTimeout(() => {
+          if (!this._joinCustomScenario) {
+            this.showScreen('screen-army');
+            this.initArmyBuilder(1);
+          }
+        }, 1500);
       }
     );
   },
@@ -2338,12 +2394,15 @@ const UI = {
   },
 
   // ─── Scenario Editor ─────────────────────────────────────
-  _scEngine:    null,
-  _scSquads:    [[], []],
-  _scMode:      'elimination',
-  _scTheme:     'urban',
-  _scObjectives: {},       // custom objective placements keyed by mode
-  _scObjBrush:  null,      // which objective the user is currently placing
+  _scEngine:       null,
+  _scSquads:       [[], []],
+  _scMode:         'elimination',
+  _scTheme:        'urban',
+  _scObjectives:   {},       // custom objective placements keyed by mode
+  _scObjBrush:     null,     // which objective the user is currently placing
+  _scPointBudget:  10,       // per-team point limit
+  _scScenarioType: 'single', // 'single' | 'local' | 'online'
+  _pendingScenario: null,    // set when launching online/local from scenario editor
 
   showScenarioEditor() {
     this.showScreen('screen-scenario');
@@ -2351,6 +2410,8 @@ const UI = {
     this._scRenderAll();
     this._scRenderSquads();
     this.scSetMode(this._scMode);
+    this.scSetPointBudget(this._scPointBudget);
+    this.scSetScenarioType(this._scScenarioType);
   },
 
   _scNewMap() {
@@ -2374,6 +2435,49 @@ const UI = {
     const btn = document.querySelector(`[data-sc-theme="${theme}"]`);
     if (btn) btn.classList.add('active');
     if (this._scEngine) { this._scEngine.theme = theme; this._scRenderAll(); }
+  },
+
+  scSetPointBudget(n) {
+    this._scPointBudget = n;
+    document.querySelectorAll('[data-sc-budget]').forEach(b => b.classList.remove('active'));
+    const btn = document.querySelector(`[data-sc-budget="${n}"]`);
+    if (btn) btn.classList.add('active');
+    const info = document.getElementById('sc-budget-info');
+    if (info) info.textContent = `Each team gets ${n} points to build their squad.`;
+    this._scUpdateBudgetDisplay();
+  },
+
+  scSetScenarioType(type) {
+    this._scScenarioType = type;
+    document.querySelectorAll('[data-sc-type]').forEach(b => b.classList.remove('active'));
+    const btn = document.querySelector(`[data-sc-type="${type}"]`);
+    if (btn) btn.classList.add('active');
+    this._scUpdatePlayButtons();
+  },
+
+  _scUpdatePlayButtons() {
+    const type      = this._scScenarioType;
+    const aiBtn     = document.getElementById('sc-play-ai');
+    const localBtn  = document.getElementById('sc-play-local');
+    const onlineBtn = document.getElementById('sc-play-online');
+    if (aiBtn)     aiBtn.style.display     = (type === 'single') ? '' : 'none';
+    if (localBtn)  localBtn.style.display  = (type === 'local')  ? '' : 'none';
+    if (onlineBtn) onlineBtn.style.display = (type === 'online') ? '' : 'none';
+  },
+
+  _scBudgetUsed(team) {
+    return this._scSquads[team].reduce((s, t) => s + (UNIT_DEFS[t]?.cost || 0), 0);
+  },
+
+  _scUpdateBudgetDisplay() {
+    [0, 1].forEach(team => {
+      const el = document.getElementById(`sc-budget-${team}`);
+      if (!el) return;
+      const used = this._scBudgetUsed(team);
+      const max  = this._scPointBudget;
+      el.textContent = `${used}/${max} pts`;
+      el.style.color = used > max ? '#ff4545' : (used === max ? '#4caf50' : 'var(--text2)');
+    });
   },
 
   scRerollMap() {
@@ -2531,14 +2635,23 @@ const UI = {
     if (this._scSquads[team].length >= 6) {
       this._scSetStatus('Max 6 units per team.'); return;
     }
+    const cost = UNIT_DEFS[type]?.cost || 0;
+    const remaining = this._scPointBudget - this._scBudgetUsed(team);
+    if (cost > remaining) {
+      const teamName = team === 0 ? 'Alpha' : 'Bravo';
+      this._scSetStatus(`⚠️ ${teamName} only has ${remaining} pt${remaining !== 1 ? 's' : ''} left — ${UNIT_DEFS[type].name} costs ${cost}.`);
+      return;
+    }
     this._scSquads[team].push(type);
     this._scRenderSquads();
+    this._scUpdateBudgetDisplay();
     this._scSetStatus('');
   },
 
   scRemoveUnit(team, idx) {
     this._scSquads[team].splice(idx, 1);
     this._scRenderSquads();
+    this._scUpdateBudgetDisplay();
   },
 
   _scRenderSquads() {
@@ -2577,6 +2690,8 @@ const UI = {
     if (!this._scSquads[1].length)                return 'Bravo team needs units.';
     if (!this._scSquads[0].includes('leader'))    return 'Alpha needs a Leader.';
     if (!this._scSquads[1].includes('leader'))    return 'Bravo needs a Leader.';
+    if (this._scBudgetUsed(0) > this._scPointBudget) return `Alpha team exceeds the ${this._scPointBudget}-point budget.`;
+    if (this._scBudgetUsed(1) > this._scPointBudget) return `Bravo team exceeds the ${this._scPointBudget}-point budget.`;
     const mode = this._scMode;
     const obj  = this._scObjectives;
     if (mode === 'ctf'  && !obj.flag)              return 'Place the CTF flag on the map.';
@@ -2618,6 +2733,76 @@ const UI = {
     this._scSetStatus('');
   },
 
+  // Play the scenario as local 2-player (both players on same device, no army builder).
+  scPlayLocal() {
+    const err = this._scValidate();
+    if (err) { this._scSetStatus('⚠️ ' + err); return; }
+
+    const scEng = this._scEngine;
+    scEng._scCustomObjectives = this._scObjectives;
+    scEng.players[0].squadDef = this._scSquads[0].slice();
+    scEng.players[1].squadDef = this._scSquads[1].slice();
+    scEng.mode            = 'local';
+    scEng.gameMode        = this._scMode;
+    scEng.bombFuseLength  = 8;
+    scEng.bombAttackerTeam = 0;
+
+    this._previewEngine = scEng;
+    this.armyDraft      = [scEng.players[0].squadDef, scEng.players[1].squadDef];
+    this.mode           = 'local';
+    this.gameMode       = this._scMode;
+    this.theme          = this._scTheme;
+
+    this.startGame();
+    this._scSetStatus('');
+  },
+
+  // Queue the scenario for online play, then open the lobby.
+  // The host sends a 'customScenario' handshake on connect so the joiner
+  // knows to skip the army builder and wait for the host's 'init' state.
+  scPlayOnline() {
+    const err = this._scValidate();
+    if (err) { this._scSetStatus('⚠️ ' + err); return; }
+
+    const scEng = this._scEngine;
+    scEng._scCustomObjectives = this._scObjectives;
+    scEng.players[0].squadDef = this._scSquads[0].slice();
+    scEng.players[1].squadDef = this._scSquads[1].slice();
+    scEng.gameMode        = this._scMode;
+    scEng.bombFuseLength  = 8;
+    scEng.bombAttackerTeam = 0;
+
+    this._pendingScenario = {
+      engine:   scEng,
+      squads:   [this._scSquads[0].slice(), this._scSquads[1].slice()],
+      gameMode: this._scMode,
+      theme:    this._scTheme,
+      name:     (document.getElementById('sc-name')?.value.trim()) || 'Custom Scenario',
+    };
+
+    this.mode      = 'online';
+    this.myTeam    = 0;
+    this.armyDraft = [[], []];
+    this.showScreen('screen-lobby');
+
+    // Show the scenario info card in the lobby
+    const card = document.getElementById('lobby-scenario-card');
+    const lbl  = document.getElementById('lobby-scenario-label');
+    if (card) card.style.display = '';
+    if (lbl)  lbl.textContent = `Scenario: "${this._pendingScenario.name}" is ready. Host a room — your opponent just needs to join normally.`;
+    document.getElementById('lobby-status').textContent = '';
+
+    this._scSetStatus('');
+  },
+
+  // Cancel a pending online scenario from the lobby.
+  scClearOnlinePending() {
+    this._pendingScenario = null;
+    const card = document.getElementById('lobby-scenario-card');
+    if (card) card.style.display = 'none';
+    document.getElementById('lobby-status').textContent = '';
+  },
+
   // ── Save / Load ──────────────────────────────────────────
   scSave() {
     const err = this._scValidate();
@@ -2625,15 +2810,17 @@ const UI = {
     const name = (document.getElementById('sc-name')?.value.trim()) || 'scenario';
     const eng  = this._scEngine;
     const data = {
-      version:    2,
+      version:      2,
       name,
-      gameMode:   this._scMode,
-      theme:      this._scTheme,
-      squads:     [this._scSquads[0].slice(), this._scSquads[1].slice()],
-      objectives: this._scObjectives,
-      board:      eng.board,
-      buildings:  eng.buildings,
-      coverObjs:  eng.coverObjs,
+      gameMode:     this._scMode,
+      theme:        this._scTheme,
+      scenarioType: this._scScenarioType,
+      pointBudget:  this._scPointBudget,
+      squads:       [this._scSquads[0].slice(), this._scSquads[1].slice()],
+      objectives:   this._scObjectives,
+      board:        eng.board,
+      buildings:    eng.buildings,
+      coverObjs:    eng.coverObjs,
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url  = URL.createObjectURL(blob);
@@ -2664,10 +2851,16 @@ const UI = {
         this._scObjectives = data.objectives || {};
         const nameEl = document.getElementById('sc-name');
         if (nameEl) nameEl.value = data.name || '';
+        // Restore budget and scenario type (with safe defaults for old saves)
+        this._scPointBudget  = data.pointBudget  || 10;
+        this._scScenarioType = data.scenarioType || 'single';
+        this.scSetPointBudget(this._scPointBudget);
+        this.scSetScenarioType(this._scScenarioType);
         this.scSetMode(this._scMode);
         this.scSetTheme(this._scTheme);
         this._scRenderAll();
         this._scRenderSquads();
+        this._scUpdateBudgetDisplay();
         this._scSetStatus(`✅ Loaded "${data.name}"`);
       } catch (err) {
         this._scSetStatus('❌ Failed to load: ' + err.message);
