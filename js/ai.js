@@ -382,22 +382,26 @@ class AIPlayer {
       return actions;
     }
 
-    // Shoot a blocker if we can still move after
-    const targets = state.getValidTargets(unit);
-    if (targets.length && actionsLeft >= 2) {
-      const best = this._pickTarget(state, unit, targets);
-      actions.push({ type: 'aim',   unitId: unit.id });
-      actions.push({ type: 'shoot', unitId: unit.id, targetId: best.id });
-      actionsLeft -= 2;
-    }
-
+    // Move toward site first — the objective is urgent
     if (actionsLeft >= 1) {
       const dest = this._moveTowardCover(state, unit, site.x, site.y);
       if (dest) {
         actions.push({ type: 'move', unitId: unit.id, x: dest.x, y: dest.y });
         actionsLeft--;
-        if (dest.x === site.x && dest.y === site.y)
+        if (dest.x === site.x && dest.y === site.y) {
           actions.push({ type: 'defuse_bomb', unitId: unit.id });
+          actionsLeft--;
+        }
+      }
+    }
+
+    // Use any remaining action to shoot a blocker
+    if (actionsLeft >= 1) {
+      const targets = state.getValidTargets(unit);
+      if (targets.length) {
+        actions.push({ type: 'shoot', unitId: unit.id,
+                       targetId: this._pickTarget(state, unit, targets).id });
+        actionsLeft--;
       }
     }
 
@@ -420,21 +424,26 @@ class AIPlayer {
       return actions;
     }
 
-    const targets = state.getValidTargets(unit);
-    if (targets.length && actionsLeft >= 2) {
-      const best = this._pickTarget(state, unit, targets);
-      actions.push({ type: 'aim',   unitId: unit.id });
-      actions.push({ type: 'shoot', unitId: unit.id, targetId: best.id });
-      actionsLeft -= 2;
-    }
-
+    // Move toward site first — planting is the priority
     if (actionsLeft >= 1) {
       const dest = this._moveTowardCover(state, unit, site.x, site.y);
       if (dest) {
         actions.push({ type: 'move', unitId: unit.id, x: dest.x, y: dest.y });
         actionsLeft--;
-        if (dest.x === site.x && dest.y === site.y)
+        if (dest.x === site.x && dest.y === site.y) {
           actions.push({ type: 'plant_bomb', unitId: unit.id });
+          actionsLeft--;
+        }
+      }
+    }
+
+    // Use any remaining action to shoot a blocker
+    if (actionsLeft >= 1) {
+      const targets = state.getValidTargets(unit);
+      if (targets.length) {
+        actions.push({ type: 'shoot', unitId: unit.id,
+                       targetId: this._pickTarget(state, unit, targets).id });
+        actionsLeft--;
       }
     }
 
@@ -543,10 +552,21 @@ class AIPlayer {
     }
 
     if (actionsLeft >= 1) {
-      const dest = this._moveTowardCover(state, unit, flag.x, flag.y);
-      if (dest) {
-        actions.push({ type: 'move', unitId: unit.id, x: dest.x, y: dest.y });
+      // If already on the flag tile, pick it up immediately
+      if (unit.x === flag.x && unit.y === flag.y) {
+        actions.push({ type: 'pickup_flag', unitId: unit.id });
         actionsLeft--;
+      } else {
+        const dest = this._moveTowardCover(state, unit, flag.x, flag.y);
+        if (dest) {
+          actions.push({ type: 'move', unitId: unit.id, x: dest.x, y: dest.y });
+          actionsLeft--;
+          // If the move lands us on the flag, pick it up with any remaining action
+          if (dest.x === flag.x && dest.y === flag.y && actionsLeft >= 1) {
+            actions.push({ type: 'pickup_flag', unitId: unit.id });
+            actionsLeft--;
+          }
+        }
       }
     }
 

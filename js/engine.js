@@ -1058,7 +1058,6 @@ class Engine {
       this.addLog(`💥 BOOM! The bomb explodes! Attackers win!`, 'system');
       this.phase  = 'gameover';
       this.winner = attTeam;
-      this.winner = 0;
     }
   }
 

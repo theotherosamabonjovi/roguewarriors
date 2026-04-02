@@ -138,17 +138,16 @@ const UI = {
       // If both happened to click ready before the message round-tripped
       // (e.g. single machine testing), check now.
       if ((this._onlineReady & 3) === 3) this._bothSquadsReady();
-    } else if (this.mode === 'ai' || p === this.myTeam) {
-      // AI builds its own squad
-      if (this.mode === 'ai') {
-        this.armyDraft[1] = this._buildAISquad();
-      }
+    } else if (this.mode === 'ai') {
+      // AI builds its own squad then go straight to battlefield
+      this.armyDraft[1] = this._buildAISquad();
       this.showScreen('screen-battlefield');
       this.initBattlefieldSetup();
     } else if (this.mode === 'local' && p === 0) {
-      // Switch to player 2 build
+      // Local 2-player: Player 1 done — switch to Player 2 builder
       this.initArmyBuilder(1);
     } else {
+      // Local 2-player: Player 2 done — go to battlefield
       this.showScreen('screen-battlefield');
       this.initBattlefieldSetup();
     }
@@ -1284,7 +1283,19 @@ const UI = {
         break;
       case 'pickup_bomb':
         if (!state.getActiveUnit()) state.activateUnit(unit);
-        if (unit) { state.tryPickupBomb(unit); }
+        if (unit) { state.tryPickupBomb(unit); state.useAction(1); }
+        break;
+      case 'pickup_flag':
+        if (!state.getActiveUnit()) state.activateUnit(unit);
+        if (unit) {
+          state.tryPickupFlag(unit);
+          state.useAction(1);
+          if (state.phase === 'gameover') {
+            this.aiRunning = false;
+            setTimeout(() => this._showGameOver(), 1000);
+            return;
+          }
+        }
         break;
       case 'plant_bomb':
         if (!state.getActiveUnit()) state.activateUnit(unit);
